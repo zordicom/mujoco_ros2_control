@@ -104,7 +104,27 @@ hardware_interface::return_type MujocoSystem::write(
   // Joint states
   for (auto &joint_state : joint_states_)
   {
-    if (joint_state.is_position_control_enabled)
+    // Detect if commands have changed (indicating active controller)
+    const double threshold = 1e-6;
+    if (std::abs(joint_state.position_command - joint_state.initial_position_command) > threshold)
+    {
+      joint_state.position_command_active = true;
+    }
+    if (std::abs(joint_state.velocity_command - joint_state.initial_velocity_command) > threshold)
+    {
+      joint_state.velocity_command_active = true;
+    }
+    if (std::abs(joint_state.effort_command - joint_state.initial_effort_command) > threshold)
+    {
+      joint_state.effort_command_active = true;
+    }
+
+    // Apply position control only if enabled AND (active or control_mode specifies it)
+    bool apply_position = joint_state.is_position_control_enabled &&
+                          (control_mode_ == "position" ||
+                           (control_mode_ == "all" && joint_state.position_command_active));
+
+    if (apply_position)
     {
       if (joint_state.is_pid_enabled)
       {
@@ -118,7 +138,12 @@ hardware_interface::return_type MujocoSystem::write(
       }
     }
 
-    if (joint_state.is_velocity_control_enabled)
+    // Apply velocity control only if enabled AND (active or control_mode specifies it)
+    bool apply_velocity = joint_state.is_velocity_control_enabled &&
+                          (control_mode_ == "velocity" ||
+                           (control_mode_ == "all" && joint_state.velocity_command_active));
+
+    if (apply_velocity)
     {
       if (joint_state.is_pid_enabled)
       {
@@ -133,7 +158,12 @@ hardware_interface::return_type MujocoSystem::write(
       }
     }
 
-    if (joint_state.is_effort_control_enabled)
+    // Apply effort control only if enabled AND (active or control_mode specifies it)
+    bool apply_effort = joint_state.is_effort_control_enabled &&
+                        (control_mode_ == "effort" ||
+                         (control_mode_ == "all" && joint_state.effort_command_active));
+
+    if (apply_effort)
     {
       double min_eff, max_eff;
       min_eff = joint_state.joint_limits.has_effort_limits
@@ -171,6 +201,20 @@ bool MujocoSystem::init_sim(
 void MujocoSystem::register_joints(
   const urdf::Model &urdf_model, const hardware_interface::HardwareInfo &hardware_info)
 {
+  // Read control_mode parameter to enable selective control modes
+  // Valid values: "all" (default), "position", "velocity", "effort"
+  auto control_mode_it = hardware_info.hardware_parameters.find("control_mode");
+  if (control_mode_it != hardware_info.hardware_parameters.end())
+  {
+    control_mode_ = control_mode_it->second;
+    RCLCPP_INFO_STREAM(logger_, "Control mode set to: " << control_mode_);
+  }
+  else
+  {
+    control_mode_ = "all";
+    RCLCPP_INFO_STREAM(logger_, "Control mode not specified, defaulting to 'all'");
+  }
+
   joint_states_.resize(hardware_info.joints.size());
 
   for (size_t joint_index = 0; joint_index < hardware_info.joints.size(); joint_index++)
@@ -288,34 +332,47 @@ void MujocoSystem::register_joints(
 
     // command interfaces
     // overwrite joint limit with min/max value
+    // Only enable control modes specified by control_mode_ parameter
     for (const auto &command_if : joint.command_interfaces)
     {
       if (command_if.name.find(hardware_interface::HW_IF_POSITION) != std::string::npos)
       {
+        // Only enable position control if control_mode allows it
+        bool enable_position = (control_mode_ == "all" || control_mode_ == "position");
+
         command_interfaces_.emplace_back(
           joint.name, hardware_interface::HW_IF_POSITION, &last_joint_state.position_command);
-        last_joint_state.is_position_control_enabled = true;
+        last_joint_state.is_position_control_enabled = enable_position;
         last_joint_state.position_command = last_joint_state.position;
+        last_joint_state.initial_position_command = last_joint_state.position;  // Store initial value
         // TODO(sangteak601): These are not used at all. Potentially can be removed.
         last_joint_state.min_position_command = get_min_value(command_if);
         last_joint_state.max_position_command = get_max_value(command_if);
       }
       else if (command_if.name.find(hardware_interface::HW_IF_VELOCITY) != std::string::npos)
       {
+        // Only enable velocity control if control_mode allows it
+        bool enable_velocity = (control_mode_ == "all" || control_mode_ == "velocity");
+
         command_interfaces_.emplace_back(
           joint.name, hardware_interface::HW_IF_VELOCITY, &last_joint_state.velocity_command);
-        last_joint_state.is_velocity_control_enabled = true;
+        last_joint_state.is_velocity_control_enabled = enable_velocity;
         last_joint_state.velocity_command = last_joint_state.velocity;
+        last_joint_state.initial_velocity_command = last_joint_state.velocity;  // Store initial value
         // TODO(sangteak601): These are not used at all. Potentially can be removed.
         last_joint_state.min_velocity_command = get_min_value(command_if);
         last_joint_state.max_velocity_command = get_max_value(command_if);
       }
       else if (command_if.name == hardware_interface::HW_IF_EFFORT)
       {
+        // Only enable effort control if control_mode allows it
+        bool enable_effort = (control_mode_ == "all" || control_mode_ == "effort");
+
         command_interfaces_.emplace_back(
           joint.name, hardware_interface::HW_IF_EFFORT, &last_joint_state.effort_command);
-        last_joint_state.is_effort_control_enabled = true;
+        last_joint_state.is_effort_control_enabled = enable_effort;
         last_joint_state.effort_command = last_joint_state.effort;
+        last_joint_state.initial_effort_command = last_joint_state.effort;  // Store initial value
         last_joint_state.min_effort_command = get_min_value(command_if);
         last_joint_state.max_effort_command = get_max_value(command_if);
       }

@@ -82,6 +82,16 @@ public:
     int mj_joint_type;
     int mj_pos_adr;
     int mj_vel_adr;
+    
+    // Track initial command values to detect if interface is actively being used
+    double initial_position_command;
+    double initial_velocity_command;
+    double initial_effort_command;
+    
+    // Track if commands have ever been modified (indicates active controller)
+    bool position_command_active{false};
+    bool velocity_command_active{false};
+    bool effort_command_active{false};
   };
 
   template <typename T>
@@ -130,6 +140,10 @@ private:
   mjData *mj_data_;
 
   rclcpp::Logger logger_;  // TODO(sangteak601): delete?
+  
+  // Control mode: "all", "position", "velocity", or "effort"
+  // When set to specific mode, only that control interface is enabled
+  std::string control_mode_{"all"};
 };
 }  // namespace mujoco_ros2_control
 
