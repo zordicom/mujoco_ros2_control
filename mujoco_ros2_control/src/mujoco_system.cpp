@@ -120,17 +120,35 @@ hardware_interface::return_type MujocoSystem::write(
     }
 
     // Apply position control only if enabled AND (active or control_mode specifies it)
+    // In "all" mode: position is default, but disable if velocity/effort are actively commanding
     bool apply_position = joint_state.is_position_control_enabled &&
                           (control_mode_ == "position" ||
-                           (control_mode_ == "all" && joint_state.position_command_active));
+                           (control_mode_ == "all" && joint_state.position_command_active &&
+                            !joint_state.velocity_command_active && !joint_state.effort_command_active));
+
+    // Debug logging for first joint only, every 500 cycles
+    static int debug_counter = 0;
+    if (joint_state.name.find("joint1") != std::string::npos && debug_counter++ % 500 == 0)
+    {
+      RCLCPP_INFO(logger_, "Joint1 Debug: apply_pos=%d, is_enabled=%d, mode=%s, active=%d, cmd=%.3f, cur=%.3f, period_ns=%ld",
+        apply_position, joint_state.is_position_control_enabled, control_mode_.c_str(),
+        joint_state.position_command_active, joint_state.position_command, mj_data_->qpos[joint_state.mj_pos_adr],
+        period.nanoseconds());
+    }
 
     if (apply_position)
     {
       if (joint_state.is_pid_enabled)
       {
         double error = joint_state.position_command - mj_data_->qpos[joint_state.mj_pos_adr];
-        mj_data_->qfrc_applied[joint_state.mj_vel_adr] =
-          joint_state.position_pid.computeCommand(error, period.nanoseconds());
+        double torque = joint_state.position_pid.computeCommand(error, period.nanoseconds());
+        mj_data_->qfrc_applied[joint_state.mj_vel_adr] = torque;
+        
+        if (joint_state.name.find("joint1") != std::string::npos && debug_counter % 500 == 2)
+        {
+          RCLCPP_INFO(logger_, "Joint1 PID: error=%.3f, torque=%.3f, vel=%.3f",
+            error, torque, mj_data_->qvel[joint_state.mj_vel_adr]);
+        }
       }
       else
       {
@@ -142,6 +160,13 @@ hardware_interface::return_type MujocoSystem::write(
     bool apply_velocity = joint_state.is_velocity_control_enabled &&
                           (control_mode_ == "velocity" ||
                            (control_mode_ == "all" && joint_state.velocity_command_active));
+
+    if (joint_state.name.find("joint1") != std::string::npos && debug_counter % 500 == 1)
+    {
+      RCLCPP_INFO(logger_, "Joint1 Velocity: apply_vel=%d, is_enabled=%d, active=%d, cmd=%.3f",
+        apply_velocity, joint_state.is_velocity_control_enabled,
+        joint_state.velocity_command_active, joint_state.velocity_command);
+    }
 
     if (apply_velocity)
     {
@@ -345,6 +370,8 @@ void MujocoSystem::register_joints(
         last_joint_state.is_position_control_enabled = enable_position;
         last_joint_state.position_command = last_joint_state.position;
         last_joint_state.initial_position_command = last_joint_state.position;  // Store initial value
+        // Start with position control active so robot holds its initial pose immediately
+        last_joint_state.position_command_active = true;
         // TODO(sangteak601): These are not used at all. Potentially can be removed.
         last_joint_state.min_position_command = get_min_value(command_if);
         last_joint_state.max_position_command = get_max_value(command_if);
