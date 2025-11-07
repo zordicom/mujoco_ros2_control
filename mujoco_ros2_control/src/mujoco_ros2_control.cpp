@@ -18,6 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+#include <mutex>
+
 #include "hardware_interface/component_parser.hpp"
 #include "hardware_interface/resource_manager.hpp"
 #include "hardware_interface/system_interface.hpp"
@@ -189,7 +191,10 @@ void MujocoRos2Control::init()
 
 void MujocoRos2Control::update()
 {
-  // Get the simulation time and period
+  // Step simulation first to advance physics
+  mj_step1(mj_model_, mj_data_);
+
+  // Now read the NEW simulation time after stepping
   auto sim_time = mj_data_->time;
   int sim_time_sec = static_cast<int>(sim_time);
   int sim_time_nanosec = static_cast<int>((sim_time - sim_time_sec) * 1000000000);
@@ -197,9 +202,8 @@ void MujocoRos2Control::update()
   rclcpp::Time sim_time_ros(sim_time_sec, sim_time_nanosec, RCL_ROS_TIME);
   rclcpp::Duration sim_period = sim_time_ros - last_update_sim_time_ros_;
 
+  // Publish clock AFTER stepping, so published time matches current simulation state
   publish_sim_time(sim_time_ros);
-
-  mj_step1(mj_model_, mj_data_);
 
   if (sim_period >= control_period_)
   {
@@ -216,7 +220,22 @@ void MujocoRos2Control::update()
 
 void MujocoRos2Control::publish_sim_time(rclcpp::Time sim_time)
 {
-  // TODO(sangteak601)
+  // Thread-safe monotonic clock guarantee:
+  // Since controller_manager runs in a separate thread (cm_thread_), there's a race
+  // condition where clock messages could be processed out of order. This check ensures
+  // we never publish a time that goes backwards, which would cause RViz and other nodes
+  // to reset their state. This is standard practice in multi-threaded ROS2 simulations.
+  static rclcpp::Time last_published_time(0, 0, RCL_ROS_TIME);
+  static std::mutex clock_mutex;
+
+  std::lock_guard<std::mutex> lock(clock_mutex);
+  if (sim_time <= last_published_time)
+  {
+    // Skip if time hasn't advanced (shouldn't happen with correct update() logic)
+    return;
+  }
+
+  last_published_time = sim_time;
   rosgraph_msgs::msg::Clock sim_time_msg;
   sim_time_msg.clock = sim_time;
   clock_publisher_->publish(sim_time_msg);
