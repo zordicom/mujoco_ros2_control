@@ -143,7 +143,7 @@ hardware_interface::return_type MujocoSystem::write(
         double error = joint_state.position_command - mj_data_->qpos[joint_state.mj_pos_adr];
         double torque = joint_state.position_pid.computeCommand(error, period.nanoseconds());
         mj_data_->qfrc_applied[joint_state.mj_vel_adr] = torque;
-        
+
         if (joint_state.name.find("joint1") != std::string::npos && debug_counter % 500 == 2)
         {
           RCLCPP_INFO(logger_, "Joint1 PID: error=%.3f, torque=%.3f, vel=%.3f",
