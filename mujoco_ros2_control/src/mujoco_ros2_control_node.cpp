@@ -40,6 +40,14 @@ int main(int argc, const char **argv)
   RCLCPP_INFO_STREAM(node->get_logger(), "Initializing mujoco_ros2_control node...");
   auto model_path = node->get_parameter("mujoco_model_path").as_string();
 
+  // Check if headless mode is enabled (no viewer window)
+  // Note: Parameter is automatically declared via automatically_declare_parameters_from_overrides(true)
+  bool headless = node->get_parameter("headless").as_bool();
+  if (headless)
+  {
+    RCLCPP_INFO(node->get_logger(), "Running in HEADLESS mode (no viewer window)");
+  }
+
   // load and compile model
   char error[1000] = "Could not load binary model";
   if (
@@ -68,44 +76,75 @@ int main(int argc, const char **argv)
   RCLCPP_INFO_STREAM(
     node->get_logger(), "Mujoco ros2 controller has been successfully initialized !");
 
-  // initialize mujoco visualization environment for rendering and cameras
-  if (!glfwInit())
-  {
-    mju_error("Could not initialize GLFW");
-  }
-  auto rendering = mujoco_ros2_control::MujocoRendering::get_instance();
-  rendering->init(mujoco_model, mujoco_data);
-  RCLCPP_INFO_STREAM(node->get_logger(), "Mujoco rendering has been successfully initialized !");
+  // Initialize rendering and cameras (optional in headless mode)
+  mujoco_ros2_control::MujocoRendering *rendering = nullptr;
+  std::unique_ptr<mujoco_ros2_control::MujocoCameras> cameras = nullptr;
 
-  auto cameras = std::make_unique<mujoco_ros2_control::MujocoCameras>(node);
-  cameras->init(mujoco_model);
+  if (!headless)
+  {
+    // initialize mujoco visualization environment for rendering and cameras
+    if (!glfwInit())
+    {
+      mju_error("Could not initialize GLFW");
+    }
+    rendering = mujoco_ros2_control::MujocoRendering::get_instance();
+    rendering->init(mujoco_model, mujoco_data);
+    RCLCPP_INFO_STREAM(node->get_logger(), "Mujoco rendering has been successfully initialized !");
+
+    cameras = std::make_unique<mujoco_ros2_control::MujocoCameras>(node);
+    cameras->init(mujoco_model);
+  }
 
   // run main loop, target real-time simulation and 60 fps rendering with cameras around 6 hz
   mjtNum last_cam_update = mujoco_data->time;
-  while (rclcpp::ok() && !rendering->is_close_flag_raised())
-  {
-    // advance interactive simulation for 1/60 sec
-    //  Assuming MuJoCo can simulate faster than real-time, which it usually can,
-    //  this loop will finish on time for the next frame to be rendered at 60 fps.
-    //  Otherwise add a cpu timer and exit this loop when it is time to render.
-    mjtNum simstart = mujoco_data->time;
-    while (mujoco_data->time - simstart < 1.0 / 60.0)
-    {
-      mujoco_control.update();
-    }
-    rendering->update();
 
-    // Updating cameras at ~6 Hz
-    // TODO(eholum): Break control and rendering into separate processes
-    if (simstart - last_cam_update > 1.0 / 6.0)
+  if (headless)
+  {
+    // Headless mode: no rendering or cameras, just simulation
+    RCLCPP_INFO(node->get_logger(), "Starting headless simulation loop (no cameras, no rendering)...");
+    while (rclcpp::ok())
     {
-      cameras->update(mujoco_model, mujoco_data);
-      last_cam_update = simstart;
+      mjtNum simstart = mujoco_data->time;
+      while (mujoco_data->time - simstart < 1.0 / 60.0)
+      {
+        mujoco_control.update();
+      }
+    }
+  }
+  else
+  {
+    // Normal mode: with rendering
+    while (rclcpp::ok() && !rendering->is_close_flag_raised())
+    {
+      // advance interactive simulation for 1/60 sec
+      //  Assuming MuJoCo can simulate faster than real-time, which it usually can,
+      //  this loop will finish on time for the next frame to be rendered at 60 fps.
+      //  Otherwise add a cpu timer and exit this loop when it is time to render.
+      mjtNum simstart = mujoco_data->time;
+      while (mujoco_data->time - simstart < 1.0 / 60.0)
+      {
+        mujoco_control.update();
+      }
+      rendering->update();
+
+      // Updating cameras at ~6 Hz
+      // TODO(eholum): Break control and rendering into separate processes
+      if (simstart - last_cam_update > 1.0 / 6.0)
+      {
+        cameras->update(mujoco_model, mujoco_data);
+        last_cam_update = simstart;
+      }
     }
   }
 
-  rendering->close();
-  cameras->close();
+  if (rendering)
+  {
+    rendering->close();
+  }
+  if (cameras)
+  {
+    cameras->close();
+  }
 
   // free MuJoCo model and data
   mj_deleteData(mujoco_data);
