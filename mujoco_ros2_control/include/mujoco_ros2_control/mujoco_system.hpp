@@ -54,6 +54,14 @@ public:
     mjModel *mujoco_model, mjData *mujoco_data, const urdf::Model &urdf_model,
     const hardware_interface::HardwareInfo &hardware_info) override;
 
+  // Command mode switching support (called by controller manager)
+  hardware_interface::return_type prepare_command_mode_switch(
+    const std::vector<std::string> &start_interfaces,
+    const std::vector<std::string> &stop_interfaces) override;
+  hardware_interface::return_type perform_command_mode_switch(
+    const std::vector<std::string> &start_interfaces,
+    const std::vector<std::string> &stop_interfaces) override;
+
   struct JointState
   {
     std::string name;
@@ -82,13 +90,8 @@ public:
     int mj_joint_type;
     int mj_pos_adr;
     int mj_vel_adr;
-    
-    // Track initial command values to detect if interface is actively being used
-    double initial_position_command;
-    double initial_velocity_command;
-    double initial_effort_command;
-    
-    // Track if commands have ever been modified (indicates active controller)
+
+    // Track which command interface is currently active (set via controller manager callbacks)
     bool position_command_active{false};
     bool velocity_command_active{false};
     bool effort_command_active{false};
@@ -140,7 +143,7 @@ private:
   mjData *mj_data_;
 
   rclcpp::Logger logger_;  // TODO(sangteak601): delete?
-  
+
   // Control mode: "all", "position", "velocity", or "effort"
   // When set to specific mode, only that control interface is enabled
   std::string control_mode_{"all"};

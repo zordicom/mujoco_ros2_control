@@ -102,23 +102,15 @@ hardware_interface::return_type MujocoSystem::write(
     }
   }
   // Joint states
+  // Note: Controller switching is now handled via prepare/perform_command_mode_switch()
+  // callbacks from the controller manager. No timeout-based detection needed.
+
+  // Debug logging counter - incremented once per write() call, not per joint
+  static int debug_counter = 0;
+  debug_counter++;
+
   for (auto &joint_state : joint_states_)
   {
-    // Detect if commands have changed (indicating active controller)
-    const double threshold = 1e-6;
-    if (std::abs(joint_state.position_command - joint_state.initial_position_command) > threshold)
-    {
-      joint_state.position_command_active = true;
-    }
-    if (std::abs(joint_state.velocity_command - joint_state.initial_velocity_command) > threshold)
-    {
-      joint_state.velocity_command_active = true;
-    }
-    if (std::abs(joint_state.effort_command - joint_state.initial_effort_command) > threshold)
-    {
-      joint_state.effort_command_active = true;
-    }
-
     // Apply position control only if enabled AND (active or control_mode specifies it)
     // In "all" mode: position is default, but disable if velocity/effort are actively commanding
     bool apply_position = joint_state.is_position_control_enabled &&
@@ -126,9 +118,8 @@ hardware_interface::return_type MujocoSystem::write(
                            (control_mode_ == "all" && joint_state.position_command_active &&
                             !joint_state.velocity_command_active && !joint_state.effort_command_active));
 
-    // Debug logging for first joint only, every 500 cycles
-    static int debug_counter = 0;
-    if (joint_state.name.find("joint1") != std::string::npos && debug_counter++ % 500 == 0)
+    // Debug logging for first joint only, every 70000 cycles (~4 seconds)
+    if (joint_state.name.find("joint1") != std::string::npos && debug_counter % 70000 == 0)
     {
       RCLCPP_INFO(logger_, "Joint1 Debug: apply_pos=%d, is_enabled=%d, mode=%s, active=%d, cmd=%.3f, cur=%.3f, period_ns=%ld",
         apply_position, joint_state.is_position_control_enabled, control_mode_.c_str(),
@@ -144,7 +135,7 @@ hardware_interface::return_type MujocoSystem::write(
         double torque = joint_state.position_pid.computeCommand(error, period.nanoseconds());
         mj_data_->qfrc_applied[joint_state.mj_vel_adr] = torque;
 
-        if (joint_state.name.find("joint1") != std::string::npos && debug_counter % 500 == 2)
+        if (joint_state.name.find("joint1") != std::string::npos && debug_counter % 70000 == 2)
         {
           RCLCPP_INFO(logger_, "Joint1 PID: error=%.3f, torque=%.3f, vel=%.3f",
             error, torque, mj_data_->qvel[joint_state.mj_vel_adr]);
@@ -161,7 +152,7 @@ hardware_interface::return_type MujocoSystem::write(
                           (control_mode_ == "velocity" ||
                            (control_mode_ == "all" && joint_state.velocity_command_active));
 
-    if (joint_state.name.find("joint1") != std::string::npos && debug_counter % 500 == 1)
+    if (joint_state.name.find("joint1") != std::string::npos && debug_counter % 70000 == 1)
     {
       RCLCPP_INFO(logger_, "Joint1 Velocity: apply_vel=%d, is_enabled=%d, active=%d, cmd=%.3f",
         apply_velocity, joint_state.is_velocity_control_enabled,
@@ -204,6 +195,141 @@ hardware_interface::return_type MujocoSystem::write(
         clamp(joint_state.effort_command, min_eff, max_eff);
     }
   }
+  return hardware_interface::return_type::OK;
+}
+
+hardware_interface::return_type MujocoSystem::prepare_command_mode_switch(
+  const std::vector<std::string> &start_interfaces,
+  const std::vector<std::string> &stop_interfaces)
+{
+  // Verify that all interfaces exist
+  for (const auto &interface : start_interfaces)
+  {
+    RCLCPP_DEBUG(logger_, "Preparing to START interface: %s", interface.c_str());
+  }
+  for (const auto &interface : stop_interfaces)
+  {
+    RCLCPP_DEBUG(logger_, "Preparing to STOP interface: %s", interface.c_str());
+  }
+  return hardware_interface::return_type::OK;
+}
+
+hardware_interface::return_type MujocoSystem::perform_command_mode_switch(
+  const std::vector<std::string> &start_interfaces,
+  const std::vector<std::string> &stop_interfaces)
+{
+  // Handle controller switching in "all" mode
+  if (control_mode_ != "all")
+  {
+    // In specific control modes, don't do dynamic switching
+    return hardware_interface::return_type::OK;
+  }
+
+  // Process stopped interfaces first
+  for (const auto &interface : stop_interfaces)
+  {
+    // Parse interface name: "joint_name/interface_type"
+    size_t pos = interface.find('/');
+    if (pos == std::string::npos)
+      continue;
+
+    std::string joint_name = interface.substr(0, pos);
+    std::string interface_type = interface.substr(pos + 1);
+
+    // Find the joint
+    for (auto &joint_state : joint_states_)
+    {
+      if (joint_state.name == joint_name)
+      {
+        if (interface_type == "position")
+        {
+          joint_state.position_command_active = false;
+          if (joint_name.find("joint1") != std::string::npos)
+          {
+            RCLCPP_INFO(
+              logger_, "Controller switch: Position interface STOPPED for %s", joint_name.c_str());
+          }
+        }
+        else if (interface_type == "velocity")
+        {
+          joint_state.velocity_command_active = false;
+          if (joint_name.find("joint1") != std::string::npos)
+          {
+            RCLCPP_INFO(
+              logger_, "Controller switch: Velocity interface STOPPED for %s", joint_name.c_str());
+          }
+        }
+        else if (interface_type == "effort")
+        {
+          joint_state.effort_command_active = false;
+          if (joint_name.find("joint1") != std::string::npos)
+          {
+            RCLCPP_INFO(
+              logger_, "Controller switch: Effort interface STOPPED for %s", joint_name.c_str());
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  // Process started interfaces
+  for (const auto &interface : start_interfaces)
+  {
+    // Parse interface name: "joint_name/interface_type"
+    size_t pos = interface.find('/');
+    if (pos == std::string::npos)
+      continue;
+
+    std::string joint_name = interface.substr(0, pos);
+    std::string interface_type = interface.substr(pos + 1);
+
+    // Find the joint
+    for (auto &joint_state : joint_states_)
+    {
+      if (joint_state.name == joint_name)
+      {
+        if (interface_type == "position")
+        {
+          joint_state.position_command_active = true;
+          // Disable other modes when position starts
+          joint_state.velocity_command_active = false;
+          joint_state.effort_command_active = false;
+          if (joint_name.find("joint1") != std::string::npos)
+          {
+            RCLCPP_INFO(
+              logger_, "Controller switch: Position interface STARTED for %s", joint_name.c_str());
+          }
+        }
+        else if (interface_type == "velocity")
+        {
+          joint_state.velocity_command_active = true;
+          // Disable other modes when velocity starts
+          joint_state.position_command_active = false;
+          joint_state.effort_command_active = false;
+          if (joint_name.find("joint1") != std::string::npos)
+          {
+            RCLCPP_INFO(
+              logger_, "Controller switch: Velocity interface STARTED for %s", joint_name.c_str());
+          }
+        }
+        else if (interface_type == "effort")
+        {
+          joint_state.effort_command_active = true;
+          // Disable other modes when effort starts
+          joint_state.position_command_active = false;
+          joint_state.velocity_command_active = false;
+          if (joint_name.find("joint1") != std::string::npos)
+          {
+            RCLCPP_INFO(
+              logger_, "Controller switch: Effort interface STARTED for %s", joint_name.c_str());
+          }
+        }
+        break;
+      }
+    }
+  }
+
   return hardware_interface::return_type::OK;
 }
 
@@ -369,8 +495,9 @@ void MujocoSystem::register_joints(
           joint.name, hardware_interface::HW_IF_POSITION, &last_joint_state.position_command);
         last_joint_state.is_position_control_enabled = enable_position;
         last_joint_state.position_command = last_joint_state.position;
-        last_joint_state.initial_position_command = last_joint_state.position;  // Store initial value
-        // Start with position control active so robot holds its initial pose immediately
+        // Start with position control active to hold initial pose during startup
+        // This prevents the robot from falling before controllers are loaded
+        // Controller manager will explicitly switch via perform_command_mode_switch()
         last_joint_state.position_command_active = true;
         // TODO(sangteak601): These are not used at all. Potentially can be removed.
         last_joint_state.min_position_command = get_min_value(command_if);
@@ -385,7 +512,6 @@ void MujocoSystem::register_joints(
           joint.name, hardware_interface::HW_IF_VELOCITY, &last_joint_state.velocity_command);
         last_joint_state.is_velocity_control_enabled = enable_velocity;
         last_joint_state.velocity_command = last_joint_state.velocity;
-        last_joint_state.initial_velocity_command = last_joint_state.velocity;  // Store initial value
         // TODO(sangteak601): These are not used at all. Potentially can be removed.
         last_joint_state.min_velocity_command = get_min_value(command_if);
         last_joint_state.max_velocity_command = get_max_value(command_if);
@@ -399,7 +525,6 @@ void MujocoSystem::register_joints(
           joint.name, hardware_interface::HW_IF_EFFORT, &last_joint_state.effort_command);
         last_joint_state.is_effort_control_enabled = enable_effort;
         last_joint_state.effort_command = last_joint_state.effort;
-        last_joint_state.initial_effort_command = last_joint_state.effort;  // Store initial value
         last_joint_state.min_effort_command = get_min_value(command_if);
         last_joint_state.max_effort_command = get_max_value(command_if);
       }
