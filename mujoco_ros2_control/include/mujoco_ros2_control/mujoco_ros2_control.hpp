@@ -23,6 +23,7 @@
 
 #include <memory>
 #include <string>
+#include <mutex>
 
 #include "controller_manager/controller_manager.hpp"
 #include "pluginlib/class_loader.hpp"
@@ -32,6 +33,7 @@
 #include "mujoco/mujoco.h"
 
 #include "mujoco_ros2_control/mujoco_system.hpp"
+#include "mujoco_ros2_control_msgs/srv/apply_external_wrench.hpp"
 
 namespace mujoco_ros2_control
 {
@@ -46,6 +48,10 @@ public:
 private:
   void publish_sim_time(rclcpp::Time sim_time);
   std::string get_robot_description();
+  void handle_apply_external_wrench(
+    const std::shared_ptr<mujoco_ros2_control_msgs::srv::ApplyExternalWrench::Request> request,
+    std::shared_ptr<mujoco_ros2_control_msgs::srv::ApplyExternalWrench::Response> response);
+
   rclcpp::Node::SharedPtr node_;
   mjModel *mj_model_;
   mjData *mj_data_;
@@ -61,6 +67,23 @@ private:
 
   rclcpp::Time last_update_sim_time_ros_;
   rclcpp::Publisher<rosgraph_msgs::msg::Clock>::SharedPtr clock_publisher_;
+
+  // External wrench application (headless perturbations)
+  struct ActiveWrench
+  {
+    int body_id = -1;
+    double fx = 0.0;
+    double fy = 0.0;
+    double fz = 0.0;
+    double tx = 0.0;
+    double ty = 0.0;
+    double tz = 0.0;
+    double end_time = 0.0;  // in simulation time
+    bool active = false;
+  };
+  rclcpp::Service<mujoco_ros2_control_msgs::srv::ApplyExternalWrench>::SharedPtr apply_external_wrench_srv_;
+  std::mutex active_wrench_mutex_;
+  ActiveWrench active_wrench_;
 };
 }  // namespace mujoco_ros2_control
 

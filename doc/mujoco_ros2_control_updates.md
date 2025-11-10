@@ -111,6 +111,26 @@ Added periodic logging (every 500 cycles) for joint1:
 
 Allows pluginlib to discover the MujocoSystem implementation
 
+### 9. External Wrench Application Service
+
+**New Service**: `ApplyExternalWrench.srv` - Programmatically apply forces/torques to bodies for testing (e.g., gravity compensation validation in headless mode)
+
+**Implementation**:
+
+- Service handler stores wrench parameters in `ActiveWrench` struct
+- `update()` applies wrench to `xfrc_applied[body_id]` before physics step
+- Auto-expires after specified duration
+- Thread-safe with mutex
+
+**Usage**:
+
+```bash
+ros2 service call /apply_external_wrench mujoco_ros2_control/srv/ApplyExternalWrench \
+  "{body_name: 'openarm_link7', wrench: {force: {z: -10.0}}, in_world_frame: true, duration: 1.0}"
+```
+
+**Build Changes**: Renamed executable to `mujoco_ros2_control_node` (avoid package name conflict), added rosidl interface generation
+
 ## When Would Controller Switching Error Out in Sim?
 
 **Current Implementation**: `prepare_command_mode_switch()` always returns `OK`
@@ -149,3 +169,4 @@ Allows pluginlib to discover the MujocoSystem implementation
 2. Test startup stability (robot should hold initial pose)
 3. Check clock monotonicity in RViz (no jumps or resets)
 4. Validate each control mode works after switching
+5. Test external wrench service with gravity compensation (see `test_gravity_compensation.py`)

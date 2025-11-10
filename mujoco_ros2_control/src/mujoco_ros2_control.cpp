@@ -187,10 +187,47 @@ void MujocoRos2Control::init()
     }
   };
   cm_thread_ = std::thread(spin);
+
+  // Service to apply external wrench (writes to mjData->xfrc_applied inside update loop)
+  apply_external_wrench_srv_ =
+    node_->create_service<mujoco_ros2_control_msgs::srv::ApplyExternalWrench>(
+      "apply_external_wrench",
+      std::bind(
+        &MujocoRos2Control::handle_apply_external_wrench, this,
+        std::placeholders::_1, std::placeholders::_2));
+
+  RCLCPP_INFO(
+    logger_,
+    "External wrench service ready at '~/apply_external_wrench' (uses xfrc_applied)");
 }
 
 void MujocoRos2Control::update()
 {
+  // Apply any active external wrench before stepping physics
+  {
+    std::lock_guard<std::mutex> lock(active_wrench_mutex_);
+    if (active_wrench_.active && active_wrench_.body_id >= 0)
+    {
+      const double now = mj_data_->time;
+      mjtNum* xfrc = &mj_data_->xfrc_applied[6 * active_wrench_.body_id];
+      if (now <= active_wrench_.end_time)
+      {
+        xfrc[0] = static_cast<mjtNum>(active_wrench_.fx);
+        xfrc[1] = static_cast<mjtNum>(active_wrench_.fy);
+        xfrc[2] = static_cast<mjtNum>(active_wrench_.fz);
+        xfrc[3] = static_cast<mjtNum>(active_wrench_.tx);
+        xfrc[4] = static_cast<mjtNum>(active_wrench_.ty);
+        xfrc[5] = static_cast<mjtNum>(active_wrench_.tz);
+      }
+      else
+      {
+        // Clear and deactivate
+        xfrc[0] = xfrc[1] = xfrc[2] = xfrc[3] = xfrc[4] = xfrc[5] = 0.0;
+        active_wrench_.active = false;
+      }
+    }
+  }
+
   // Step simulation first to advance physics
   mj_step1(mj_model_, mj_data_);
 
@@ -239,6 +276,52 @@ void MujocoRos2Control::publish_sim_time(rclcpp::Time sim_time)
   rosgraph_msgs::msg::Clock sim_time_msg;
   sim_time_msg.clock = sim_time;
   clock_publisher_->publish(sim_time_msg);
+}
+
+void MujocoRos2Control::handle_apply_external_wrench(
+  const std::shared_ptr<mujoco_ros2_control_msgs::srv::ApplyExternalWrench::Request> request,
+  std::shared_ptr<mujoco_ros2_control_msgs::srv::ApplyExternalWrench::Response> response)
+{
+  // Lookup body id
+  const std::string body_name = request->body_name;
+  int body_id = mj_name2id(mj_model_, mjOBJ_BODY, body_name.c_str());
+  if (body_id < 0)
+  {
+    response->accepted = false;
+    response->message = "Body not found: " + body_name;
+    RCLCPP_WARN(logger_, "apply_external_wrench: body '%s' not found", body_name.c_str());
+    return;
+  }
+
+  // For now, assume wrench is expressed in world frame. MuJoCo expects xfrc_applied to be
+  // in world frame; if a future need arises, we can add body-frame support.
+  const double fx = request->wrench.force.x;
+  const double fy = request->wrench.force.y;
+  const double fz = request->wrench.force.z;
+  const double tx = request->wrench.torque.x;
+  const double ty = request->wrench.torque.y;
+  const double tz = request->wrench.torque.z;
+
+  const double duration = std::max(0.0, request->duration);
+
+  {
+    std::lock_guard<std::mutex> lock(active_wrench_mutex_);
+    active_wrench_.body_id = body_id;
+    active_wrench_.fx = fx;
+    active_wrench_.fy = fy;
+    active_wrench_.fz = fz;
+    active_wrench_.tx = tx;
+    active_wrench_.ty = ty;
+    active_wrench_.tz = tz;
+    active_wrench_.end_time = mj_data_->time + duration;
+    active_wrench_.active = duration > 0.0;
+  }
+
+  response->accepted = true;
+  response->message = "Applied wrench to body '" + body_name + "' for " + std::to_string(duration) + "s";
+  RCLCPP_INFO(
+    logger_, "apply_external_wrench: body='%s' F[%.2f,%.2f,%.2f] T[%.2f,%.2f,%.2f], dur=%.3fs",
+    body_name.c_str(), fx, fy, fz, tx, ty, tz, duration);
 }
 
 }  // namespace mujoco_ros2_control

@@ -14,6 +14,7 @@ endif()
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(mujoco_ros2_control_msgs REQUIRED)
 find_package(hardware_interface REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(controller_manager REQUIRED)
@@ -26,6 +27,7 @@ find_package(control_toolbox REQUIRED)
 set(THIS_PACKAGE_DEPENDS
   ament_cmake
   rclcpp
+  mujoco_ros2_control_msgs
   hardware_interface
   pluginlib
   controller_manager
