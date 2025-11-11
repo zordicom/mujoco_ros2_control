@@ -4,6 +4,8 @@
 
 **Files Modified**: 4 files, +254 insertions, -12 deletions
 
+**Key Features**: 10 major updates including dynamic controller switching, thread-safe clock publishing, qfrc_bias publisher, and external wrench service
+
 ### 1. Dynamic Controller Switching via ros2_control API
 
 **New Methods** (`mujoco_system.hpp` + `mujoco_system.cpp`):
@@ -111,7 +113,26 @@ Added periodic logging (every 500 cycles) for joint1:
 
 Allows pluginlib to discover the MujocoSystem implementation
 
-### 9. External Wrench Application Service
+### 9. qfrc_bias Publisher for Gravity Compensation Debugging
+
+**New Publisher**: `/mujoco/qfrc_bias` (`std_msgs/Float64MultiArray`)
+
+**Purpose**: Publishes MuJoCo's internal `qfrc_bias` (gravity + Coriolis + centrifugal forces) for comparison with external dynamics libraries like Pinocchio
+
+**Implementation**:
+
+- Created in `mujoco_ros2_control.cpp` constructor
+- Published every update cycle with `mj_data->qfrc_bias` values
+- Useful for validating gravity compensation implementations
+
+**Usage**:
+
+```bash
+# Monitor MuJoCo's internal gravity computation
+ros2 topic echo /mujoco/qfrc_bias
+```
+
+### 10. External Wrench Application Service
 
 **New Service**: `ApplyExternalWrench.srv` - Programmatically apply forces/torques to bodies for testing (e.g., gravity compensation validation in headless mode)
 
@@ -121,6 +142,12 @@ Allows pluginlib to discover the MujocoSystem implementation
 - `update()` applies wrench to `xfrc_applied[body_id]` before physics step
 - Auto-expires after specified duration
 - Thread-safe with mutex
+
+**Threading Fix**:
+
+- **Critical Fix**: Added main node to controller manager executor: `cm_executor_->add_node(node_->get_node_base_interface())`
+- **Why Needed**: Service callbacks run in executor thread; without this, services would not respond
+- **Impact**: External wrench service now responds properly to ROS2 service calls
 
 **Usage**:
 
@@ -169,4 +196,5 @@ ros2 service call /apply_external_wrench mujoco_ros2_control/srv/ApplyExternalWr
 2. Test startup stability (robot should hold initial pose)
 3. Check clock monotonicity in RViz (no jumps or resets)
 4. Validate each control mode works after switching
-5. Test external wrench service with gravity compensation (see `test_gravity_compensation.py`)
+5. Test qfrc_bias publisher: `ros2 topic echo /mujoco/qfrc_bias` (compare with Pinocchio gravity computation)
+6. Test external wrench service with gravity compensation (see `test_gravity_compensation.py`)
