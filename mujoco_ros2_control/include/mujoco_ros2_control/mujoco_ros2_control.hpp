@@ -29,6 +29,7 @@
 #include "pluginlib/class_loader.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rosgraph_msgs/msg/clock.hpp"
+#include "std_msgs/msg/float64_multi_array.hpp"
 
 #include "mujoco/mujoco.h"
 
@@ -67,6 +68,9 @@ private:
 
   rclcpp::Time last_update_sim_time_ros_;
   rclcpp::Publisher<rosgraph_msgs::msg::Clock>::SharedPtr clock_publisher_;
+
+  // Diagnostic publisher for gravity compensation debugging
+  rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr qfrc_bias_publisher_;
 
   // External wrench application (headless perturbations)
   struct ActiveWrench

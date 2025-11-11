@@ -140,17 +140,6 @@ hardware_interface::return_type MujocoSystem::write(
                            (control_mode_ == "all" && joint_state.position_command_active &&
                             !joint_state.velocity_command_active && !joint_state.effort_command_active));
 
-    // Debug logging for first joint only, every 70000 cycles (~4 seconds)
-    // Only print info about the currently ACTIVE control mode
-    if (joint_state.name.find("joint1") != std::string::npos && debug_counter % 70000 == 0)
-    {
-      if (apply_position)
-      {
-        RCLCPP_INFO(logger_, "Joint1 [POSITION]: cmd=%.3f, cur=%.3f, mode=%s",
-          joint_state.position_command, mj_data_->qpos[joint_state.mj_pos_adr], control_mode_.c_str());
-      }
-    }
-
     if (apply_position)
     {
       if (joint_state.is_pid_enabled)
@@ -158,13 +147,6 @@ hardware_interface::return_type MujocoSystem::write(
         double error = joint_state.position_command - mj_data_->qpos[joint_state.mj_pos_adr];
         double torque = joint_state.position_pid.computeCommand(error, period.nanoseconds());
         mj_data_->qfrc_applied[joint_state.mj_vel_adr] = torque;
-
-        // Regular debug logging for joint1 only
-        if (joint_state.name.find("joint1") != std::string::npos && debug_counter % 70000 == 0)
-        {
-          RCLCPP_INFO(logger_, "Joint1 [POSITION PID]: error=%.3f, torque=%.3f, vel=%.3f",
-            error, torque, mj_data_->qvel[joint_state.mj_vel_adr]);
-        }
       }
       else
       {
@@ -176,15 +158,6 @@ hardware_interface::return_type MujocoSystem::write(
     bool apply_velocity = joint_state.is_velocity_control_enabled &&
                           (control_mode_ == "velocity" ||
                            (control_mode_ == "all" && joint_state.velocity_command_active));
-
-    if (joint_state.name.find("joint1") != std::string::npos && debug_counter % 70000 == 0)
-    {
-      if (apply_velocity)
-      {
-        RCLCPP_INFO(logger_, "Joint1 [VELOCITY]: cmd=%.3f, cur=%.3f, mode=%s",
-          joint_state.velocity_command, mj_data_->qvel[joint_state.mj_vel_adr], control_mode_.c_str());
-      }
-    }
 
     if (apply_velocity)
     {
@@ -205,18 +178,6 @@ hardware_interface::return_type MujocoSystem::write(
     bool apply_effort = joint_state.is_effort_control_enabled &&
                         (control_mode_ == "effort" ||
                          (control_mode_ == "all" && joint_state.effort_command_active));
-
-    if (joint_state.name.find("joint1") != std::string::npos && debug_counter % 70000 == 0)
-    {
-      if (apply_effort)
-      {
-        RCLCPP_INFO(logger_, "Joint1 [EFFORT]: cmd=%.3f, qfrc_applied=%.3f, qfrc_bias=%.3f, mode=%s",
-          joint_state.effort_command,
-          mj_data_->qfrc_applied[joint_state.mj_vel_adr],
-          mj_data_->qfrc_bias[joint_state.mj_vel_adr],
-          control_mode_.c_str());
-      }
-    }
 
     if (apply_effort)
     {

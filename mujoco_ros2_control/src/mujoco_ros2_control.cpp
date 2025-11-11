@@ -89,6 +89,11 @@ void MujocoRos2Control::init()
 {
   clock_publisher_ = node_->create_publisher<rosgraph_msgs::msg::Clock>("/clock", 10);
 
+  // Publish qfrc_bias for gravity compensation debugging (compare with Pinocchio)
+  qfrc_bias_publisher_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>(
+    "/mujoco/qfrc_bias", 10);
+  RCLCPP_INFO(logger_, "Publishing qfrc_bias to /mujoco/qfrc_bias for gravity comp debugging");
+
   std::string urdf_string = this->get_robot_description();
 
   // setup actuators and mechanism control node.
@@ -164,6 +169,9 @@ void MujocoRos2Control::init()
     std::move(resource_manager), cm_executor_, "controller_manager", node_->get_namespace());
   cm_executor_->add_node(controller_manager_);
 
+  // Add main node to executor so its services (e.g., apply_external_wrench) can respond
+  cm_executor_->add_node(node_->get_node_base_interface());
+
   if (!controller_manager_->has_parameter("update_rate"))
   {
     RCLCPP_ERROR_STREAM(logger_, "controller manager doesn't have an update_rate parameter");
@@ -209,6 +217,14 @@ void MujocoRos2Control::update()
     if (active_wrench_.active && active_wrench_.body_id >= 0)
     {
       const double now = mj_data_->time;
+
+      // On first application, convert duration to absolute end time
+      if (active_wrench_.end_time < 100.0) {  // Heuristic: if < 100s, it's a duration not timestamp
+        active_wrench_.end_time = now + active_wrench_.end_time;
+        RCLCPP_INFO(logger_, "Activating external wrench on body_id=%d for %.2fs (until t=%.2fs)",
+          active_wrench_.body_id, active_wrench_.end_time - now, active_wrench_.end_time);
+      }
+
       mjtNum* xfrc = &mj_data_->xfrc_applied[6 * active_wrench_.body_id];
       if (now <= active_wrench_.end_time)
       {
@@ -218,10 +234,21 @@ void MujocoRos2Control::update()
         xfrc[3] = static_cast<mjtNum>(active_wrench_.tx);
         xfrc[4] = static_cast<mjtNum>(active_wrench_.ty);
         xfrc[5] = static_cast<mjtNum>(active_wrench_.tz);
+
+        // Debug: Log when wrench is being applied (every 0.5s)
+        static double last_log_time = 0.0;
+        if (now - last_log_time > 0.5) {
+          RCLCPP_INFO(logger_,
+            "WRENCH ACTIVE: body_id=%d, F[%.2f,%.2f,%.2f] N, remaining=%.2fs",
+            active_wrench_.body_id, xfrc[0], xfrc[1], xfrc[2],
+            active_wrench_.end_time - now);
+          last_log_time = now;
+        }
       }
       else
       {
         // Clear and deactivate
+        RCLCPP_INFO(logger_, "External wrench EXPIRED, clearing forces");
         xfrc[0] = xfrc[1] = xfrc[2] = xfrc[3] = xfrc[4] = xfrc[5] = 0.0;
         active_wrench_.active = false;
       }
@@ -253,6 +280,16 @@ void MujocoRos2Control::update()
   controller_manager_->write(sim_time_ros, sim_period);
 
   mj_step2(mj_model_, mj_data_);
+
+  // Publish qfrc_bias for debugging (after mj_step2 which computes it)
+  // This allows gravity compensation controller to compare Pinocchio vs MuJoCo
+  std_msgs::msg::Float64MultiArray qfrc_bias_msg;
+  qfrc_bias_msg.data.resize(mj_model_->nv);
+  for (int i = 0; i < mj_model_->nv; i++)
+  {
+    qfrc_bias_msg.data[i] = mj_data_->qfrc_bias[i];
+  }
+  qfrc_bias_publisher_->publish(qfrc_bias_msg);
 }
 
 void MujocoRos2Control::publish_sim_time(rclcpp::Time sim_time)
@@ -282,7 +319,7 @@ void MujocoRos2Control::handle_apply_external_wrench(
   const std::shared_ptr<mujoco_ros2_control_msgs::srv::ApplyExternalWrench::Request> request,
   std::shared_ptr<mujoco_ros2_control_msgs::srv::ApplyExternalWrench::Response> response)
 {
-  // Lookup body id
+  // Lookup body id (thread-safe, model is read-only)
   const std::string body_name = request->body_name;
   int body_id = mj_name2id(mj_model_, mjOBJ_BODY, body_name.c_str());
   if (body_id < 0)
@@ -304,6 +341,8 @@ void MujocoRos2Control::handle_apply_external_wrench(
 
   const double duration = std::max(0.0, request->duration);
 
+  // IMPORTANT: Don't access mj_data_ from service thread without mutex
+  // Store duration directly, and compute end_time in update() loop
   {
     std::lock_guard<std::mutex> lock(active_wrench_mutex_);
     active_wrench_.body_id = body_id;
@@ -313,15 +352,16 @@ void MujocoRos2Control::handle_apply_external_wrench(
     active_wrench_.tx = tx;
     active_wrench_.ty = ty;
     active_wrench_.tz = tz;
-    active_wrench_.end_time = mj_data_->time + duration;
+    // Store current time atomically in update() loop, use duration for now
+    active_wrench_.end_time = duration;  // Will be converted to absolute time in update()
     active_wrench_.active = duration > 0.0;
   }
 
   response->accepted = true;
   response->message = "Applied wrench to body '" + body_name + "' for " + std::to_string(duration) + "s";
   RCLCPP_INFO(
-    logger_, "apply_external_wrench: body='%s' F[%.2f,%.2f,%.2f] T[%.2f,%.2f,%.2f], dur=%.3fs",
-    body_name.c_str(), fx, fy, fz, tx, ty, tz, duration);
+    logger_, "apply_external_wrench SERVICE RECEIVED: body='%s' (id=%d) F[%.2f,%.2f,%.2f] T[%.2f,%.2f,%.2f], dur=%.3fs",
+    body_name.c_str(), body_id, fx, fy, fz, tx, ty, tz, duration);
 }
 
 }  // namespace mujoco_ros2_control
