@@ -18,6 +18,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+#include <chrono>
+#include <thread>
+
 #include "mujoco/mujoco.h"
 #include "rclcpp/rclcpp.hpp"
 
@@ -95,45 +98,157 @@ int main(int argc, const char **argv)
     cameras->init(mujoco_model);
   }
 
-  // run main loop, target real-time simulation and 60 fps rendering with cameras around 6 hz
+  // run main loop with REAL-TIME SYNCHRONIZATION
+  // Physics runs at model timestep rate (typically 1000 Hz = 1ms per step)
+  // Each physics step is throttled to maintain 1:1 sim time to real time ratio
+
   mjtNum last_cam_update = mujoco_data->time;
+
+  // Get physics timestep from model
+  const double physics_timestep = mujoco_model->opt.timestep;  // seconds
+  const auto target_dt = std::chrono::duration<double>(physics_timestep);
+
+  // Speedup measurement (optional - uncomment for debugging)
+  // auto speedup_measurement_start = std::chrono::steady_clock::now();
+  // double sim_time_at_measurement_start = mujoco_data->time;
+  // int cycle_count = 0;
+
+  RCLCPP_INFO(node->get_logger(),
+    "Starting real-time synchronized simulation loop (timestep=%.6fs, target_rate=%.0f Hz)",
+    physics_timestep, 1.0 / physics_timestep);
 
   if (headless)
   {
-    // Headless mode: no rendering or cameras, just simulation
-    RCLCPP_INFO(node->get_logger(), "Starting headless simulation loop (no cameras, no rendering)...");
+    // Headless mode: no rendering or cameras, just simulation with real-time sync
+    RCLCPP_INFO(node->get_logger(), "Running in HEADLESS mode with real-time synchronization");
+
     while (rclcpp::ok())
     {
-      mjtNum simstart = mujoco_data->time;
-      while (mujoco_data->time - simstart < 1.0 / 60.0)
+      auto cycle_start = std::chrono::steady_clock::now();
+
+      // Single physics step
+      mujoco_control.update();
+      // cycle_count++;
+
+      // Real-time synchronization: sleep to maintain 1:1 ratio
+      auto elapsed = std::chrono::steady_clock::now() - cycle_start;
+      if (elapsed < target_dt)
       {
-        mujoco_control.update();
+        std::this_thread::sleep_for(target_dt - elapsed);
       }
+
+      // Speedup logging disabled (uncomment for debugging)
+      /*
+      auto measurement_elapsed = std::chrono::steady_clock::now() - speedup_measurement_start;
+      if (measurement_elapsed >= std::chrono::seconds(10))
+      {
+        double real_time_elapsed =
+          std::chrono::duration<double>(measurement_elapsed).count();
+        double sim_time_elapsed = mujoco_data->time - sim_time_at_measurement_start;
+        double speedup = sim_time_elapsed / real_time_elapsed;
+
+        RCLCPP_INFO(node->get_logger(),
+          "Simulation speedup: %.2fx (sim=%.1fs, real=%.1fs, cycles=%d)",
+          speedup, sim_time_elapsed, real_time_elapsed, cycle_count);
+
+        if (speedup > 1.1)
+        {
+          RCLCPP_WARN(node->get_logger(),
+            "Simulation running %.2fx faster than real-time! CPU too fast or throttling failed.",
+            speedup);
+        }
+        else if (speedup < 0.9)
+        {
+          RCLCPP_WARN(node->get_logger(),
+            "Simulation running %.2fx slower than real-time. CPU may be overloaded.",
+            speedup);
+        }
+
+        speedup_measurement_start = std::chrono::steady_clock::now();
+        sim_time_at_measurement_start = mujoco_data->time;
+        cycle_count = 0;
+      }
+      */
     }
   }
   else
   {
-    // Normal mode: with rendering
+    // Normal mode: with rendering at 60 Hz and real-time physics sync
+    RCLCPP_INFO(node->get_logger(),
+      "Running with RENDERING at 60 Hz and real-time synchronization");
+
+    int render_counter = 0;
+    const int render_interval = static_cast<int>(std::round((1.0 / 60.0) / physics_timestep));
+    const int camera_interval = static_cast<int>(std::round((1.0 / 6.0) / physics_timestep));
+
+    RCLCPP_INFO(node->get_logger(),
+      "Render every %d physics steps (~60 Hz), cameras every %d steps (~6 Hz)",
+      render_interval, camera_interval);
+
     while (rclcpp::ok() && !rendering->is_close_flag_raised())
     {
-      // advance interactive simulation for 1/60 sec
-      //  Assuming MuJoCo can simulate faster than real-time, which it usually can,
-      //  this loop will finish on time for the next frame to be rendered at 60 fps.
-      //  Otherwise add a cpu timer and exit this loop when it is time to render.
-      mjtNum simstart = mujoco_data->time;
-      while (mujoco_data->time - simstart < 1.0 / 60.0)
-      {
-        mujoco_control.update();
-      }
-      rendering->update();
+      auto cycle_start = std::chrono::steady_clock::now();
 
-      // Updating cameras at ~6 Hz
-      // TODO(eholum): Break control and rendering into separate processes
-      if (simstart - last_cam_update > 1.0 / 6.0)
+      // Single physics step
+      mujoco_control.update();
+      // cycle_count++;
+      render_counter++;
+
+      // Render at 60 Hz (every ~16 physics steps for 1ms timestep)
+      if (render_counter >= render_interval)
+      {
+        rendering->update();
+        render_counter = 0;
+      }
+
+      // Update cameras at 6 Hz
+      static int camera_counter = 0;
+      if (++camera_counter >= camera_interval)
       {
         cameras->update(mujoco_model, mujoco_data);
-        last_cam_update = simstart;
+        last_cam_update = mujoco_data->time;
+        camera_counter = 0;
       }
+
+      // Real-time synchronization: sleep to maintain 1:1 ratio
+      auto elapsed = std::chrono::steady_clock::now() - cycle_start;
+      if (elapsed < target_dt)
+      {
+        std::this_thread::sleep_for(target_dt - elapsed);
+      }
+
+      // Speedup logging disabled (uncomment for debugging)
+      /*
+      auto measurement_elapsed = std::chrono::steady_clock::now() - speedup_measurement_start;
+      if (measurement_elapsed >= std::chrono::seconds(10))
+      {
+        double real_time_elapsed =
+          std::chrono::duration<double>(measurement_elapsed).count();
+        double sim_time_elapsed = mujoco_data->time - sim_time_at_measurement_start;
+        double speedup = sim_time_elapsed / real_time_elapsed;
+
+        RCLCPP_INFO(node->get_logger(),
+          "Simulation speedup: %.2fx (sim=%.1fs, real=%.1fs, cycles=%d)",
+          speedup, sim_time_elapsed, real_time_elapsed, cycle_count);
+
+        if (speedup > 1.1)
+        {
+          RCLCPP_WARN(node->get_logger(),
+            "Simulation running %.2fx faster than real-time! CPU too fast or throttling failed.",
+            speedup);
+        }
+        else if (speedup < 0.9)
+        {
+          RCLCPP_WARN(node->get_logger(),
+            "Simulation running %.2fx slower than real-time. CPU may be overloaded.",
+            speedup);
+        }
+
+        speedup_measurement_start = std::chrono::steady_clock::now();
+        sim_time_at_measurement_start = mujoco_data->time;
+        cycle_count = 0;
+      }
+      */
     }
   }
 

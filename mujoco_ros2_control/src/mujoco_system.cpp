@@ -42,6 +42,8 @@ hardware_interface::return_type MujocoSystem::read(
   {
     joint_state.position = mj_data_->qpos[joint_state.mj_pos_adr];
     joint_state.velocity = mj_data_->qvel[joint_state.mj_vel_adr];
+
+    // Effort: Read from qfrc_applied (both modes write here now)
     joint_state.effort = mj_data_->qfrc_applied[joint_state.mj_vel_adr];
   }
 
@@ -155,6 +157,17 @@ hardware_interface::return_type MujocoSystem::write(
       {
         double pos_error = joint_state.position_command - mj_data_->qpos[joint_state.mj_pos_adr];
         torque += joint_state.position_pid.computeCommand(pos_error, period.nanoseconds());
+
+        // Debug: Log first few cycles to diagnose explosions
+        static int mit_log_counter = 0;
+        if (mit_log_counter++ < 10 && joint_state.name == "openarm_joint1")
+        {
+          RCLCPP_INFO(logger_, "MIT J1: pos_cmd=%.6f, pos=%.6f, vel_cmd=%.6f, "
+                      "vel=%.6f, eff_cmd=%.6f, torque_so_far=%.3f",
+                      joint_state.position_command, mj_data_->qpos[joint_state.mj_pos_adr],
+                      joint_state.velocity_command, mj_data_->qvel[joint_state.mj_vel_adr],
+                      joint_state.effort_command, torque);
+        }
       }
 
       // Component 2: Velocity feedback (if interface claimed by controller)
@@ -170,36 +183,54 @@ hardware_interface::return_type MujocoSystem::write(
         torque += joint_state.effort_command;
       }
 
-      // Apply combined MIT mode torque
+      // Clamp torque to joint limits (prevent explosions)
+      double torque_limit = joint_state.joint_limits.max_effort;
+      if (torque > torque_limit) {
+        torque = torque_limit;
+      } else if (torque < -torque_limit) {
+        torque = -torque_limit;
+      }
+
+      // Apply clamped MIT mode torque
       mj_data_->qfrc_applied[joint_state.mj_vel_adr] = torque;
     }
     else if (current_motor_mode_ == "position_servo")
     {
       // ====== POSITION SERVO MODE ======
-      // Uses MuJoCo position actuators (high stiffness servo model)
-      // Triggered when trajectory controller active (pos+vel, no effort)
+      // Implements DAMIAO Position Mode: firmware-level PD position servo
+      //
+      // Uses same PID controller as MIT mode but typically with higher gains
+      // Gains are configured in URDF (not hardcoded)
+      //
+      // This matches real hardware where Position Mode is just MIT Mode
+      // with different gain settings and no external effort commands.
 
+      double torque = 0.0;
+
+      // Position feedback (uses PID gains from URDF)
       if (joint_state.is_position_control_enabled)
       {
-        if (joint_state.mj_actuator_id >= 0)
-        {
-          // Command MuJoCo position actuator
-          mj_data_->ctrl[joint_state.mj_actuator_id] = joint_state.position_command;
-        }
-        else
-        {
-          // Fallback if no actuator found (shouldn't happen with proper XML)
-          static bool warned = false;
-          if (!warned) {
-            RCLCPP_WARN(logger_,
-              "position_servo mode: No actuator found for '%s', using direct qpos fallback",
-              joint_state.name.c_str());
-            warned = true;
-          }
-          mj_data_->qpos[joint_state.mj_pos_adr] = joint_state.position_command;
-          mj_data_->qvel[joint_state.mj_vel_adr] = 0.0;
-        }
+        double pos_error = joint_state.position_command - mj_data_->qpos[joint_state.mj_pos_adr];
+        torque += joint_state.position_pid.computeCommand(pos_error, period.nanoseconds());
       }
+
+      // Velocity feedback (uses PID gains from URDF)
+      if (joint_state.is_velocity_control_enabled)
+      {
+        double vel_error = joint_state.velocity_command - mj_data_->qvel[joint_state.mj_vel_adr];
+        torque += joint_state.velocity_pid.computeCommand(vel_error, period.nanoseconds());
+      }
+
+      // Clamp torque to joint limits (prevent explosions)
+      double torque_limit = joint_state.joint_limits.max_effort;
+      if (torque > torque_limit) {
+        torque = torque_limit;
+      } else if (torque < -torque_limit) {
+        torque = -torque_limit;
+      }
+
+      // Apply clamped PD torque
+      mj_data_->qfrc_applied[joint_state.mj_vel_adr] = torque;
     }
     else
     {

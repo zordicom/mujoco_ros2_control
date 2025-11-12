@@ -157,7 +157,6 @@ is_effort_control_enabled = true;
 
 **Migration:**
 
-- Old code using `control_mode:=all` continues to work
 - Dynamic switching happens automatically
 - No URDF changes needed
 
