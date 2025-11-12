@@ -1,200 +1,197 @@
 # MuJoCo ROS2 Control Updates
 
-## Summary of Changes (Current Branch vs Main)
+**Copyright 2025 Zordi, Inc. All rights reserved.**
 
-**Files Modified**: 4 files, +254 insertions, -12 deletions
+## Summary (Current Branch vs Main)
 
-**Key Features**: 10 major updates including dynamic controller switching, thread-safe clock publishing, qfrc_bias publisher, and external wrench service
+**Files Modified:** 2
+**Changes:** +134 insertions, -169 deletions (net: -35 lines, simplified)
 
-### 1. Dynamic Controller Switching via ros2_control API
+---
 
-**New Methods** (`mujoco_system.hpp` + `mujoco_system.cpp`):
+## Key Changes
 
-- `prepare_command_mode_switch()` - Validation phase before switching controllers
-- `perform_command_mode_switch()` - Actual switch execution, parses interface names and updates active flags
+### 1. Dynamic Control Mode Switching
 
-**Behavior**:
+**Added:** Automatic mode switching based on active controller
 
-- Receives explicit signals from controller manager when controllers activate/deactivate
-- Parses interface names (e.g., `"openarm_joint1/velocity"`) to determine which control mode to enable
-- Immediately switches active flags without timeout delays
-- Only active in `control_mode:=all` mode; bypassed in specific control modes
-
-### 2. Control Mode Selection Parameter
-
-**New Parameter**: `control_mode` (read from hardware_info at initialization)
-
-- `"all"` (default) - Enables all three interfaces, supports dynamic switching
-- `"position"` - Only position control enabled
-- `"velocity"` - Only velocity control enabled
-- `"effort"` - Only effort control enabled
-
-**Implementation**:
-
-- Read in `register_joints()` from URDF/hardware parameters
-- Controls which command interfaces are enabled via `is_*_control_enabled` flags
-- Determines whether dynamic switching is allowed
-
-### 3. Active Command Interface Tracking
-
-**New Fields** (`JointState` struct):
-
-- `position_command_active` - Position control is actively commanding
-- `velocity_command_active` - Velocity control is actively commanding
-- `effort_command_active` - Effort control is actively commanding
-
-**Startup Behavior**:
-
-- `position_command_active = true` by default (prevents robot collapse during startup)
-- Other modes start inactive
-- Controller manager switches them via `perform_command_mode_switch()`
-
-### 4. Conditional Control Application in write()
-
-**Previous**: Always applied enabled control modes simultaneously
-
-**New**: Applies control based on active flags:
+**Implementation:**
 
 ```cpp
-apply_position = is_position_control_enabled &&
-                 (control_mode == "position" ||
-                  (control_mode == "all" && position_command_active &&
-                   !velocity_command_active && !effort_command_active))
+// New variable tracks current mode
+std::string current_motor_mode_{"mit"};  // Starts in MIT mode
+
+// perform_command_mode_switch() detects interface pattern
+if (has_position && has_velocity && !has_effort)
+  current_motor_mode_ = "position_servo";
+else
+  current_motor_mode_ = "mit";  // Default
 ```
 
-**Mutual Exclusion**: Only one control mode applies per joint at a time in "all" mode
+**Behavior:**
 
-### 5. Debug Logging
+- joint_trajectory_controller activates → switches to position_servo mode
+- effort_controller activates → switches to mit mode
+- zordi_mit_controller activates → stays in mit mode
+- Logs: "Motor mode switch: mit → position_servo (interfaces: pos=1 vel=1 eff=0)"
 
-Added periodic logging (every 500 cycles) for joint1:
+---
 
-- Position control: `apply_pos`, `is_enabled`, `mode`, `active`, `cmd`, `cur`, `period_ns`
-- Velocity control: `apply_vel`, `is_enabled`, `active`, `cmd`
-- PID control: `error`, `torque`, `vel`
-- Controller switches: "Position interface STARTED/STOPPED for X"
+### 2. Two Control Modes (Simplified from Complex Logic)
 
-### 6. Simulation Timing Fixes (`mujoco_ros2_control.cpp`)
+**position_servo mode:**
 
-**Critical Change**: Moved `mj_step1()` to BEFORE reading simulation time
-
-**Previous Order**:
-
-1. Read sim time
-2. Publish clock
-3. Step simulation
-4. Read/write controllers
-
-**New Order**:
-
-1. Step simulation first
-2. Read NEW sim time (after step)
-3. Publish clock with correct time
-4. Read/write controllers
-
-**Rationale**: Ensures published clock matches actual simulation state
-
-### 7. Thread-Safe Clock Publishing
-
-**Added**:
-
-- Static `last_published_time` with mutex
-- Monotonic clock guarantee (never publish time going backwards)
-- Prevents RViz and other nodes from resetting due to out-of-order messages
-
-**Why Needed**: Controller manager runs in separate thread (`cm_executor_`), creating race conditions
-
-### 8. Plugin Export (`package.xml`)
-
-**Added**: Proper plugin export declaration
-
-```xml
-<mujoco_ros2_control plugin="${prefix}/mujoco_system_plugins.xml"/>
+```cpp
+// Uses MuJoCo position actuators
+if (mj_actuator_id >= 0)
+  mj_data->ctrl[actuator_id] = position_command;
 ```
 
-Allows pluginlib to discover the MujocoSystem implementation
+- Triggered: pos+vel interfaces (no effort)
+- Implementation: MuJoCo actuators with kp=50000
+- Purpose: Matches DAMIAO Position Mode
 
-### 9. qfrc_bias Publisher for Gravity Compensation Debugging
+**mit mode (default):**
 
-**New Publisher**: `/mujoco/qfrc_bias` (`std_msgs/Float64MultiArray`)
+```cpp
+// Combines all active components
+τ = 0;
+if (is_position_enabled) τ += Kp * (pos_cmd - pos);
+if (is_velocity_enabled) τ += Kd * (vel_cmd - vel);
+if (is_effort_enabled) τ += effort_cmd;
+mj_data->qfrc_applied[joint] = τ;
+```
 
-**Purpose**: Publishes MuJoCo's internal `qfrc_bias` (gravity + Coriolis + centrifugal forces) for comparison with external dynamics libraries like Pinocchio
+- Triggered: Any other interface combination
+- Implementation: Manual PID + effort feedforward
+- Purpose: Matches DAMIAO MIT Mode
 
-**Implementation**:
+---
 
-- Created in `mujoco_ros2_control.cpp` constructor
-- Published every update cycle with `mj_data->qfrc_bias` values
-- Useful for validating gravity compensation implementations
+### 3. Full MIT Mode Support
 
-**Usage**:
+**Before:** Position/velocity and effort were mutually exclusive
+
+```cpp
+// OLD (broken for MIT mode)
+if (position_active && !velocity_active && !effort_active)
+  apply_position_control();
+```
+
+**After:** All three can work together
+
+```cpp
+// NEW (proper MIT mode)
+τ_total = Kp*(pos_cmd - pos) + Kd*(vel_cmd - vel) + effort_cmd;
+// All three components combined additively
+```
+
+**Impact:** Controllers can now claim all three interfaces (matches real DAMIAO MIT mode)
+
+---
+
+### 4. Position Actuator Support
+
+**Added to JointState:**
+
+```cpp
+int mj_actuator_id{-1};  // MuJoCo actuator ID
+```
+
+**In register_joints():**
+
+```cpp
+// Map each joint to its actuator
+actuator_id = mj_name2id(model, mjOBJ_ACTUATOR, "actuator_" + joint.name);
+joint_state.mj_actuator_id = actuator_id;
+```
+
+**Purpose:** Enable position_servo mode using MuJoCo's built-in position actuators
+
+---
+
+### 5. Always Enable All Interfaces
+
+**Before:** Conditional enabling based on control_mode parameter
+
+```cpp
+bool enable = (control_mode_ == "all" || control_mode_ == "position");
+is_position_control_enabled = enable;
+```
+
+**After:** Always enable (mode switches dynamically)
+
+```cpp
+is_position_control_enabled = true;  // Always
+is_velocity_control_enabled = true;
+is_effort_control_enabled = true;
+```
+
+**Impact:** Interfaces always available, mode determines behavior in write()
+
+---
+
+### 6. Simplified write() Logic
+
+**Removed:**
+
+- Complex boolean conditions for mutual exclusion
+- position_command_active checks in multiple places
+- Nested control flow
+
+**Result:**
+
+- Cleaner two-mode switch statement
+- Easier to understand and maintain
+- Better matches real hardware implementation
+
+---
+
+## Backward Compatibility
+
+**Breaking changes:**
+
+- Removed "position", "velocity", "effort" control_mode values (only "all" supported)
+- control_mode parameter is deprecated (kept for compatibility but unused)
+- current_motor_mode_ is now the source of truth
+
+**Migration:**
+
+- Old code using `control_mode:=all` continues to work
+- Dynamic switching happens automatically
+- No URDF changes needed
+
+---
+
+## Testing
 
 ```bash
-# Monitor MuJoCo's internal gravity computation
-ros2 topic echo /mujoco/qfrc_bias
+# Build and test
+cd ~/ros2_ws
+colcon build --packages-select mujoco_ros2_control
+
+ros2 launch openarm_description single_arm.launch.py
+
+# Check mode switching
+ros2 control switch_controllers --activate effort_controller
+# Watch logs for: "Motor mode switch: position_servo → mit"
 ```
 
-### 10. External Wrench Application Service
+---
 
-**New Service**: `ApplyExternalWrench.srv` - Programmatically apply forces/torques to bodies for testing (e.g., gravity compensation validation in headless mode)
+## Related Changes
 
-**Implementation**:
+**Requires:** Updated openarm_description package
 
-- Service handler stores wrench parameters in `ActiveWrench` struct
-- `update()` applies wrench to `xfrc_applied[body_id]` before physics step
-- Auto-expires after specified duration
-- Thread-safe with mutex
+- Standard interface names (position, velocity, effort)
+- Position actuators in MuJoCo XML (kp=50000)
+- Updated controller configs
 
-**Threading Fix**:
+**Enables:** New zordi_mit_controller package
 
-- **Critical Fix**: Added main node to controller manager executor: `cm_executor_->add_node(node_->get_node_base_interface())`
-- **Why Needed**: Service callbacks run in executor thread; without this, services would not respond
-- **Impact**: External wrench service now responds properly to ROS2 service calls
+- Claims all three interfaces simultaneously
+- Full MIT mode with gravity compensation
 
-**Usage**:
+---
 
-```bash
-ros2 service call /apply_external_wrench mujoco_ros2_control/srv/ApplyExternalWrench \
-  "{body_name: 'openarm_link7', wrench: {force: {z: -10.0}}, in_world_frame: true, duration: 1.0}"
-```
-
-**Build Changes**: Renamed executable to `mujoco_ros2_control_node` (avoid package name conflict), added rosidl interface generation
-
-## When Would Controller Switching Error Out in Sim?
-
-**Current Implementation**: `prepare_command_mode_switch()` always returns `OK`
-
-**Potential Error Scenarios** (not currently implemented):
-
-1. ❌ **Interface doesn't exist** - Would need validation that joint/interface exists
-2. ❌ **Invalid transition** - Could reject unsafe mode switches (e.g., effort→position without zero force)
-3. ❌ **Resource conflicts** - Multiple controllers trying to claim same interface
-4. ❌ **Safety violations** - Custom safety checks (joint limits, collision detection)
-
-**In Practice for Simulation**:
-
-- **Never errors** with current implementation
-- Simulation has no physical constraints or safety concerns
-- All interfaces are virtual and always available
-- Only way to error would be to explicitly add validation logic
-
-**For Real Hardware**: Would want to add checks for:
-
-- Hardware safety limits
-- Communication with actuators
-- Sensor availability
-- Emergency stop states
-
-## Key Design Decisions
-
-1. **Position control active at startup** - Prevents robot collapse during controller loading (1-2 second window)
-2. **No timeout detection** - Relies entirely on controller manager callbacks (cleaner, instant switching)
-3. **Mutual exclusion in "all" mode** - Only one control mode active per joint (prevents conflicts)
-4. **Simulation step ordering** - Step first, then read time (correct clock synchronization)
-
-## Testing Recommendations
-
-1. Verify instant switching with debug logs: `ros2 control switch_controllers`
-2. Test startup stability (robot should hold initial pose)
-3. Check clock monotonicity in RViz (no jumps or resets)
-4. Validate each control mode works after switching
-5. Test qfrc_bias publisher: `ros2 topic echo /mujoco/qfrc_bias` (compare with Pinocchio gravity computation)
-6. Test external wrench service with gravity compensation (see `test_gravity_compensation.py`)
+**Copyright 2025 Zordi, Inc. All rights reserved.**

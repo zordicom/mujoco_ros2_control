@@ -90,6 +90,7 @@ public:
     int mj_joint_type;
     int mj_pos_adr;
     int mj_vel_adr;
+    int mj_actuator_id{-1};  // MuJoCo actuator ID for position_servo mode
 
     // Track which command interface is currently active (set via controller manager callbacks)
     bool position_command_active{false};
@@ -144,9 +145,15 @@ private:
 
   rclcpp::Logger logger_;  // TODO(sangteak601): delete?
 
-  // Control mode: "all", "position", "velocity", or "effort"
-  // When set to specific mode, only that control interface is enabled
+  // Control mode (deprecated - kept for backward compatibility)
+  // Use current_motor_mode_ for actual mode selection
   std::string control_mode_{"all"};
+
+  // Current motor mode: dynamically switched based on active controller
+  // "mit" - Full MIT mode (default, matches real hardware)
+  // "position" - Position servo mode (MuJoCo actuators)
+  // "effort" - Pure torque mode
+  std::string current_motor_mode_{"mit"};
 };
 }  // namespace mujoco_ros2_control
 
