@@ -1,0 +1,101 @@
+"""
+Copyright 2025 Zordi, Inc. All rights reserved.
+
+Controller configuration for testing multi-interface controllers on 1-DOF test joint.
+Tests zordi_mit_controller (position+velocity+effort) and joint_trajectory_controller (position+velocity).
+"""
+
+controller_manager:
+  ros__parameters:
+    update_rate: 1000  # Hz - Match MuJoCo's 1ms timestep
+
+    # Controllers to be loaded
+    joint_trajectory_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+    zordi_mit_controller:
+      type: zordi_mit_controller/ZordiMITController
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+joint_state_broadcaster:
+  ros__parameters:
+    publish_rate: 100  # Hz
+
+# Joint Trajectory Controller
+# Claims: position + velocity interfaces
+# Triggers position actuator + velocity actuator in mujoco_system.cpp
+joint_trajectory_controller:
+  ros__parameters:
+    joints:
+      - j1
+
+    # Command interfaces: position + velocity (no effort)
+    command_interfaces:
+      - position
+      - velocity
+
+    # State interfaces
+    state_interfaces:
+      - position
+      - velocity
+
+    allow_partial_joints_goal: false
+    open_loop_control: false
+    allow_integration_in_goal_trajectories: true
+
+    # Tolerances
+    constraints:
+      stopped_velocity_tolerance: 0.05  # rad/s
+      goal_time: 0.5  # Allow 0.5s settling time
+
+    # Per-joint position tolerances (rad)
+    j1: {trajectory: 0.05, goal: 0.01}
+
+# Zordi MIT Controller
+# Claims: position + velocity + effort interfaces
+# Triggers MIT mode in mujoco_system.cpp:
+#   - Position/velocity actuators neutralized (ctrl_pos=q, ctrl_vel=qd)
+#   - Torque actuator driven with: τ = Kp*(pos_cmd-q) + Kd*(vel_cmd-qd) + effort_cmd
+zordi_mit_controller:
+  ros__parameters:
+    joints:
+      - j1
+
+    # Command all three interfaces - triggers MIT mode
+    command_interfaces:
+      - position  # Hardware: Adds Kp*(pos_cmd - pos)
+      - velocity  # Hardware: Adds Kd*(vel_cmd - vel)
+      - effort    # Hardware: Adds effort_cmd directly
+
+    state_interfaces:
+      - position
+      - velocity
+
+    use_gravity_compensation: false  # No gravity on 1-DOF horizontal joint test
+
+    # Tolerances
+    constraints:
+      stopped_velocity_tolerance: 0.05  # rad/s
+      goal_time: 0.5  # Allow 0.5s settling time
+
+    # Per-joint position tolerances (rad)
+    j1: {trajectory: 0.05, goal: 0.01}
+
+# Usage:
+# 1. Start only joint_state_broadcaster initially:
+#    ros2 launch mujoco_ros2_control_demos test_1dof_mit.launch.py
+#
+# 2. Test JointTrajectoryController (position + velocity):
+#    ros2 control load_controller joint_trajectory_controller
+#    ros2 control set_controller_state joint_trajectory_controller active
+#    ros2 topic pub /joint_trajectory_controller/joint_trajectory trajectory_msgs/msg/JointTrajectory "..." --once
+#    ros2 control set_controller_state joint_trajectory_controller inactive
+#
+# 3. Test ZordiMITController (position + velocity + effort - MIT mode):
+#    ros2 control load_controller zordi_mit_controller
+#    ros2 control set_controller_state zordi_mit_controller active
+#    ros2 action send_goal /zordi_mit_controller/follow_joint_trajectory control_msgs/action/FollowJointTrajectory "..."
+#    ros2 control set_controller_state zordi_mit_controller inactive
+

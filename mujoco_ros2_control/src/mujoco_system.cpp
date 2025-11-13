@@ -20,6 +20,11 @@
 
 #include "mujoco_ros2_control/mujoco_system.hpp"
 
+#include <yaml-cpp/yaml.h>
+#include <iostream>
+#include <iomanip>
+#include <fstream>
+
 namespace mujoco_ros2_control
 {
 MujocoSystem::MujocoSystem() : logger_(rclcpp::get_logger("")) {}
@@ -87,7 +92,7 @@ hardware_interface::return_type MujocoSystem::read(
 hardware_interface::return_type MujocoSystem::write(
   const rclcpp::Time & /* time */, const rclcpp::Duration &period)
 {
-  // update mimic joint
+  // update mimic commands
   for (auto &joint_state : joint_states_)
   {
     if (joint_state.is_mimic)
@@ -103,146 +108,109 @@ hardware_interface::return_type MujocoSystem::write(
         joint_states_.at(joint_state.mimicked_joint_index).effort_command;
     }
   }
-  // Joint states
-  // Note: Controller switching is now handled via prepare/perform_command_mode_switch()
-  // callbacks from the controller manager. No timeout-based detection needed.
 
-  // Debug logging counter - incremented once per write() call, not per joint
-  static int debug_counter = 0;
-  debug_counter++;
-
-  // Check for external forces applied to bodies (e.g., user dragging in viewer)
-  // xfrc_applied contains [force_x, force_y, force_z, torque_x, torque_y, torque_z] per body
-  if (debug_counter % 70000 == 0)
-  {
-    for (int body_id = 0; body_id < mj_model_->nbody; body_id++)
-    {
-      mjtNum* xfrc = &mj_data_->xfrc_applied[6 * body_id];
-
-      // Calculate force and torque magnitudes
-      double force_mag = std::sqrt(xfrc[0]*xfrc[0] + xfrc[1]*xfrc[1] + xfrc[2]*xfrc[2]);
-      double torque_mag = std::sqrt(xfrc[3]*xfrc[3] + xfrc[4]*xfrc[4] + xfrc[5]*xfrc[5]);
-
-      // Print if significant external force/torque detected
-      if (force_mag > 1.0 || torque_mag > 0.5)
-      {
-        const char* body_name = mj_id2name(mj_model_, mjOBJ_BODY, body_id);
-        RCLCPP_INFO(logger_, "[EXTERNAL INTERACTION] Body '%s': force=%.3f N, torque=%.3f N·m",
-          body_name ? body_name : "unknown", force_mag, torque_mag);
-      }
-    }
-  }
-
+  // Drive actuators directly according to enabled command interfaces
   for (auto &joint_state : joint_states_)
   {
-    // ========================================================================
-    // DYNAMIC MODE SWITCHING (Two Modes)
-    // ========================================================================
-    // position_servo: MuJoCo actuators (DAMIAO Position Mode)
-    //                 - Triggered when: pos+vel interfaces active (no effort)
-    // mit: Full MIT mode - τ = Kp*(p_cmd-p) + Kd*(v_cmd-v) + τ_ff (DAMIAO MIT Mode)
-    //      - Triggered when: Any other interface combination
-    //      - Handles effort-only naturally (Kp=0, Kd=0 when pos/vel not enabled)
+    const double q = mj_data_->qpos[joint_state.mj_pos_adr];
+    const double qd = mj_data_->qvel[joint_state.mj_vel_adr];
 
-    if (current_motor_mode_ == "mit")
+    // Do not clear qfrc_applied here; reserve it for explicit fallback/diagnostics only
+
+    // Determine if MIT mode is active (position/velocity commands with effort)
+    // In MIT mode, we neutralize position/velocity actuators and drive torque actuator with PD
+    // 
+    // Use *_command_active flags set by perform_command_mode_switch() to detect
+    // which interfaces are actually claimed by controllers (not just exposed)
+    bool mit_mode = joint_state.effort_command_active &&
+                    (joint_state.position_command_active || joint_state.velocity_command_active);
+
+
+    // Position actuator: command, neutralize, or neutralize for MIT
+    if (joint_state.mj_pos_actuator_id >= 0 &&
+        joint_state.mj_pos_actuator_id < mj_model_->nu)
     {
-      // ====== MIT MODE ======
-      // Combines position + velocity + effort (all three components)
-      // Matches real DAMIAO hardware write() behavior exactly
-
-      double torque = 0.0;
-
-      // Component 1: Position feedback (if interface claimed by controller)
-      if (joint_state.is_position_control_enabled)
+      if (joint_state.position_command_active && !mit_mode)
       {
-        double pos_error = joint_state.position_command - mj_data_->qpos[joint_state.mj_pos_adr];
-        torque += joint_state.position_pid.computeCommand(pos_error, period.nanoseconds());
-
-        // Debug: Log first few cycles to diagnose explosions
-        static int mit_log_counter = 0;
-        if (mit_log_counter++ < 10 && joint_state.name == "openarm_joint1")
+        // Pure position mode: drive position actuator
+        double pos_cmd = joint_state.position_command;
+        if (joint_state.joint_limits.has_position_limits)
         {
-          RCLCPP_INFO(logger_, "MIT J1: pos_cmd=%.6f, pos=%.6f, vel_cmd=%.6f, "
-                      "vel=%.6f, eff_cmd=%.6f, torque_so_far=%.3f",
-                      joint_state.position_command, mj_data_->qpos[joint_state.mj_pos_adr],
-                      joint_state.velocity_command, mj_data_->qvel[joint_state.mj_vel_adr],
-                      joint_state.effort_command, torque);
+          pos_cmd = clamp(
+            pos_cmd,
+            joint_state.joint_limits.min_position,
+            joint_state.joint_limits.max_position);
         }
+        mj_data_->ctrl[joint_state.mj_pos_actuator_id] = pos_cmd;
       }
-
-      // Component 2: Velocity feedback (if interface claimed by controller)
-      if (joint_state.is_velocity_control_enabled)
+      else
       {
-        double vel_error = joint_state.velocity_command - mj_data_->qvel[joint_state.mj_vel_adr];
-        torque += joint_state.velocity_pid.computeCommand(vel_error, period.nanoseconds());
+        // Neutralize: either not claimed or MIT mode
+        mj_data_->ctrl[joint_state.mj_pos_actuator_id] = q;
       }
-
-      // Component 3: Torque feedforward (if interface claimed by controller)
-      if (joint_state.is_effort_control_enabled)
-      {
-        torque += joint_state.effort_command;
-      }
-
-      // Clamp torque to joint limits (prevent explosions)
-      double torque_limit = joint_state.joint_limits.max_effort;
-      if (torque > torque_limit) {
-        torque = torque_limit;
-      } else if (torque < -torque_limit) {
-        torque = -torque_limit;
-      }
-
-      // Apply clamped MIT mode torque
-      mj_data_->qfrc_applied[joint_state.mj_vel_adr] = torque;
     }
-    else if (current_motor_mode_ == "position_servo")
+
+    // Velocity actuator: command, neutralize, or neutralize for MIT
+    if (joint_state.mj_vel_actuator_id >= 0 &&
+        joint_state.mj_vel_actuator_id < mj_model_->nu)
     {
-      // ====== POSITION SERVO MODE ======
-      // Implements DAMIAO Position Mode: firmware-level PD position servo
-      //
-      // Uses same PID controller as MIT mode but typically with higher gains
-      // Gains are configured in URDF (not hardcoded)
-      //
-      // This matches real hardware where Position Mode is just MIT Mode
-      // with different gain settings and no external effort commands.
-
-      double torque = 0.0;
-
-      // Position feedback (uses PID gains from URDF)
-      if (joint_state.is_position_control_enabled)
+      if (joint_state.velocity_command_active && !mit_mode)
       {
-        double pos_error = joint_state.position_command - mj_data_->qpos[joint_state.mj_pos_adr];
-        torque += joint_state.position_pid.computeCommand(pos_error, period.nanoseconds());
+        // Pure velocity mode: drive velocity actuator
+        mj_data_->ctrl[joint_state.mj_vel_actuator_id] = joint_state.velocity_command;
       }
-
-      // Velocity feedback (uses PID gains from URDF)
-      if (joint_state.is_velocity_control_enabled)
+      else
       {
-        double vel_error = joint_state.velocity_command - mj_data_->qvel[joint_state.mj_vel_adr];
-        torque += joint_state.velocity_pid.computeCommand(vel_error, period.nanoseconds());
+        // Neutralize: either not claimed or MIT mode
+        mj_data_->ctrl[joint_state.mj_vel_actuator_id] = qd;
       }
-
-      // Clamp torque to joint limits (prevent explosions)
-      double torque_limit = joint_state.joint_limits.max_effort;
-      if (torque > torque_limit) {
-        torque = torque_limit;
-      } else if (torque < -torque_limit) {
-        torque = -torque_limit;
-      }
-
-      // Apply clamped PD torque
-      mj_data_->qfrc_applied[joint_state.mj_vel_adr] = torque;
     }
-    else
+
+    // Torque actuator: command or neutralize
+    // MIT-style: if position/velocity commands are active, compute PD torque and add to effort_command
+    if (joint_state.mj_tau_actuator_id >= 0 &&
+        joint_state.mj_tau_actuator_id < mj_model_->nu)
     {
-      static bool error_logged = false;
-      if (!error_logged) {
-        RCLCPP_ERROR(logger_,
-          "Unknown current_motor_mode_: '%s'. Must be: position_servo or mit",
-          current_motor_mode_.c_str());
-        error_logged = true;
+      if (joint_state.effort_command_active)
+      {
+        double tau_total = joint_state.effort_command;
+
+        // MIT-style PD composition: add PD torque if position or velocity commands are active
+        // (This enables modes 5, 6, 7 from the comprehensive test)
+        if (joint_state.position_command_active || joint_state.velocity_command_active)
+        {
+          double tau_pd = 0.0;
+
+          // Position PD term (kp * position_error)
+          if (joint_state.position_command_active && joint_state.is_pid_enabled)
+          {
+            double pos_err = joint_state.position_command - q;
+            auto pos_gains = joint_state.position_pid.getGains();
+            tau_pd += pos_gains.p_gain_ * pos_err;
+          }
+
+          // Velocity PD term (kd * velocity_error)
+          if (joint_state.velocity_command_active && joint_state.is_pid_enabled)
+          {
+            double vel_err = joint_state.velocity_command - qd;
+            auto vel_gains = joint_state.velocity_pid.getGains();
+            tau_pd += vel_gains.d_gain_ * vel_err;
+          }
+
+          tau_total += tau_pd;
+        }
+
+        const double limit = joint_state.joint_limits.max_effort;
+        mj_data_->ctrl[joint_state.mj_tau_actuator_id] =
+          clamp(tau_total, -limit, limit);
+      }
+      else
+      {
+        mj_data_->ctrl[joint_state.mj_tau_actuator_id] = 0.0;
       }
     }
   }
+
   return hardware_interface::return_type::OK;
 }
 
@@ -250,21 +218,8 @@ hardware_interface::return_type MujocoSystem::prepare_command_mode_switch(
   const std::vector<std::string> &start_interfaces,
   const std::vector<std::string> &stop_interfaces)
 {
-  // Verify that all interfaces exist and determine target mode
-  bool has_position = false, has_velocity = false, has_effort = false;
-
-  for (const auto &interface : start_interfaces)
-  {
-    RCLCPP_DEBUG(logger_, "Preparing to START interface: %s", interface.c_str());
-
-    if (interface.find("/position") != std::string::npos) has_position = true;
-    if (interface.find("/velocity") != std::string::npos) has_velocity = true;
-    if (interface.find("/effort") != std::string::npos) has_effort = true;
-  }
-  for (const auto &interface : stop_interfaces)
-  {
-    RCLCPP_DEBUG(logger_, "Preparing to STOP interface: %s", interface.c_str());
-  }
+  // Validate that the requested interface combination is feasible
+  // In actuator-centric design, we accept any combination and handle it dynamically
   return hardware_interface::return_type::OK;
 }
 
@@ -272,45 +227,73 @@ hardware_interface::return_type MujocoSystem::perform_command_mode_switch(
   const std::vector<std::string> &start_interfaces,
   const std::vector<std::string> &stop_interfaces)
 {
-  // Detect which interfaces are being activated to determine motor mode
-  // Matches real hardware behavior: controller switching triggers motor mode switching
+  // Update *_command_active flags to track which interfaces are claimed by controllers
+  // This allows write() to detect true MIT mode vs. startup with all interfaces exposed
 
-  bool has_position = false, has_velocity = false, has_effort = false;
-
-  for (const auto &interface : start_interfaces)
+  for (const auto &interface_name : stop_interfaces)
   {
-    if (interface.find("/position") != std::string::npos) has_position = true;
-    if (interface.find("/velocity") != std::string::npos) has_velocity = true;
-    if (interface.find("/effort") != std::string::npos) has_effort = true;
+    // Parse "joint_name/interface_type"
+    size_t pos = interface_name.find('/');
+    if (pos == std::string::npos) continue;
+
+    std::string joint_name = interface_name.substr(0, pos);
+    std::string interface_type = interface_name.substr(pos + 1);
+
+    // Find the joint and update its active flag
+    for (auto &joint_state : joint_states_)
+    {
+      if (joint_state.name == joint_name)
+      {
+        if (interface_type == hardware_interface::HW_IF_POSITION)
+        {
+          joint_state.position_command_active = false;
+          RCLCPP_INFO(logger_, "Stopped position interface for joint '%s'", joint_name.c_str());
+        }
+        else if (interface_type == hardware_interface::HW_IF_VELOCITY)
+        {
+          joint_state.velocity_command_active = false;
+          RCLCPP_INFO(logger_, "Stopped velocity interface for joint '%s'", joint_name.c_str());
+        }
+        else if (interface_type == hardware_interface::HW_IF_EFFORT)
+        {
+          joint_state.effort_command_active = false;
+          RCLCPP_INFO(logger_, "Stopped effort interface for joint '%s'", joint_name.c_str());
+        }
+        break;
+      }
+    }
   }
 
-  // Determine motor mode based on interface combination
-  std::string new_mode = current_motor_mode_;  // Default: keep current
-
-  if (has_position && has_velocity && !has_effort)
+  for (const auto &interface_name : start_interfaces)
   {
-    // Trajectory controller (pos + vel only) → Position Servo Mode
-    new_mode = "position_servo";
-  }
-  else
-  {
-    // All other combinations → MIT Mode (default, handles everything)
-    // - pos + vel + effort → Full MIT mode
-    // - effort only → MIT with Kp=0, Kd=0 (naturally)
-    // - any other combination → MIT (most flexible)
-    new_mode = "mit";
-  }
+    size_t pos = interface_name.find('/');
+    if (pos == std::string::npos) continue;
 
-  // Switch mode if changed
-  if (new_mode != current_motor_mode_)
-  {
-    std::string old_mode = current_motor_mode_;
-    current_motor_mode_ = new_mode;
+    std::string joint_name = interface_name.substr(0, pos);
+    std::string interface_type = interface_name.substr(pos + 1);
 
-    RCLCPP_INFO(logger_,
-      "Motor mode switch: %s → %s (interfaces: pos=%d vel=%d eff=%d)",
-      old_mode.c_str(), new_mode.c_str(),
-      has_position, has_velocity, has_effort);
+    for (auto &joint_state : joint_states_)
+    {
+      if (joint_state.name == joint_name)
+      {
+        if (interface_type == hardware_interface::HW_IF_POSITION)
+        {
+          joint_state.position_command_active = true;
+          RCLCPP_INFO(logger_, "Started position interface for joint '%s'", joint_name.c_str());
+        }
+        else if (interface_type == hardware_interface::HW_IF_VELOCITY)
+        {
+          joint_state.velocity_command_active = true;
+          RCLCPP_INFO(logger_, "Started velocity interface for joint '%s'", joint_name.c_str());
+        }
+        else if (interface_type == hardware_interface::HW_IF_EFFORT)
+        {
+          joint_state.effort_command_active = true;
+          RCLCPP_INFO(logger_, "Started effort interface for joint '%s'", joint_name.c_str());
+        }
+        break;
+      }
+    }
   }
 
   return hardware_interface::return_type::OK;
@@ -328,27 +311,32 @@ bool MujocoSystem::init_sim(
   register_joints(urdf_model, hardware_info);
   register_sensors(urdf_model, hardware_info);
 
-  set_initial_pose();
+  set_initial_pose();  // Applies URDF defaults to qpos
+
+  // Override qpos if initial pose specified
+  bool pose_override_applied = apply_initial_pose_override(hardware_info);
+
+  // CRITICAL: Sync position_command with actual qpos (after override)
+  // This ensures controllers command the pose we actually set, not URDF defaults
+  for (auto &joint_state : joint_states_)
+  {
+    joint_state.position_command = mj_data_->qpos[joint_state.mj_pos_adr];
+    joint_state.velocity_command = 0.0;
+  }
+  RCLCPP_INFO(logger_, "Initialized position commands from actual joint positions");
+
+  // Actuator-centric control: no global mode state to set
+  (void)pose_override_applied;
+  RCLCPP_INFO(logger_, "Actuator-centric control initialized");
+  RCLCPP_INFO(logger_, "MuJoCo model: nq=%d nv=%d nu=%d", mj_model_->nq, mj_model_->nv, mj_model_->nu);
+
   return true;
 }
 
 void MujocoSystem::register_joints(
   const urdf::Model &urdf_model, const hardware_interface::HardwareInfo &hardware_info)
 {
-  // control_mode parameter is deprecated (read for compatibility but unused)
-  // Actual mode switches dynamically via current_motor_mode_
-  auto control_mode_it = hardware_info.hardware_parameters.find("control_mode");
-  if (control_mode_it != hardware_info.hardware_parameters.end())
-  {
-    control_mode_ = control_mode_it->second;
-    RCLCPP_WARN(logger_, "control_mode parameter is deprecated (value '%s' ignored)", control_mode_.c_str());
-    RCLCPP_INFO(logger_, "Mode switches dynamically: joint_trajectory_controller → position_servo, others → mit");
-  }
-  else
-  {
-    control_mode_ = "all";  // Kept for compatibility
-    RCLCPP_INFO(logger_, "Dynamic mode switching enabled (starts in MIT mode)");
-  }
+  // No global control mode parameters in actuator-centric design
 
   joint_states_.resize(hardware_info.joints.size());
 
@@ -370,16 +358,31 @@ void MujocoSystem::register_joints(
     joint_state.mj_pos_adr = mj_model_->jnt_qposadr[mujoco_joint_id];
     joint_state.mj_vel_adr = mj_model_->jnt_dofadr[mujoco_joint_id];
 
-    // Look for corresponding position actuator (for position_servo mode)
-    std::string actuator_name = "actuator_" + joint.name;
-    int actuator_id = mj_name2id(mj_model_, mjOBJ_ACTUATOR, actuator_name.c_str());
-    if (actuator_id >= 0)
-    {
-      joint_state.mj_actuator_id = actuator_id;
-      // Only log for first joint to reduce spam
-      if (joint.name.find("joint1") != std::string::npos) {
-        RCLCPP_INFO(logger_, "Joint '%s' mapped to actuator %d (7 actuators total)",
-                    joint.name.c_str(), actuator_id);
+    // Look for corresponding actuators (position, velocity, motor)
+    // New naming scheme: act_pos_*, act_vel_*, act_tau_*
+    std::string pos_actuator_name = "act_pos_" + joint.name;
+    std::string vel_actuator_name = "act_vel_" + joint.name;
+    std::string tau_actuator_name = "act_tau_" + joint.name;
+
+    joint_state.mj_pos_actuator_id = mj_name2id(mj_model_, mjOBJ_ACTUATOR, pos_actuator_name.c_str());
+    joint_state.mj_vel_actuator_id = mj_name2id(mj_model_, mjOBJ_ACTUATOR, vel_actuator_name.c_str());
+    joint_state.mj_tau_actuator_id = mj_name2id(mj_model_, mjOBJ_ACTUATOR, tau_actuator_name.c_str());
+
+    // Log actuator mapping
+    RCLCPP_INFO(logger_, "Joint '%s' actuators: pos=%d, vel=%d, tau=%d",
+                joint.name.c_str(),
+                joint_state.mj_pos_actuator_id,
+                joint_state.mj_vel_actuator_id,
+                joint_state.mj_tau_actuator_id);
+
+    // Backward compatibility: check old naming scheme if new names not found
+    if (joint_state.mj_pos_actuator_id < 0) {
+      std::string old_actuator_name = "actuator_" + joint.name;
+      int old_actuator_id = mj_name2id(mj_model_, mjOBJ_ACTUATOR, old_actuator_name.c_str());
+      if (old_actuator_id >= 0) {
+        joint_state.mj_pos_actuator_id = old_actuator_id;
+        RCLCPP_WARN(logger_, "Using legacy actuator naming for joint '%s' (actuator_%s)",
+                    joint.name.c_str(), joint.name.c_str());
       }
     }
 
@@ -490,10 +493,8 @@ void MujocoSystem::register_joints(
           joint.name, hardware_interface::HW_IF_POSITION, &last_joint_state.position_command);
         last_joint_state.is_position_control_enabled = true;
         last_joint_state.position_command = last_joint_state.position;
-        // Start with position control active to hold initial pose during startup
-        // This prevents the robot from falling before controllers are loaded
-        // Controller manager will explicitly switch via perform_command_mode_switch()
-        last_joint_state.position_command_active = true;
+        // position_command_active starts false; set to true by perform_command_mode_switch()
+        // when a controller claims this interface
         // TODO(sangteak601): These are not used at all. Potentially can be removed.
         last_joint_state.min_position_command = get_min_value(command_if);
         last_joint_state.max_position_command = get_max_value(command_if);
@@ -694,6 +695,107 @@ void MujocoSystem::set_initial_pose()
   {
     mj_data_->qpos[joint_state.mj_pos_adr] = joint_state.position;
   }
+}
+
+bool MujocoSystem::apply_initial_pose_override(
+  const hardware_interface::HardwareInfo &hardware_info)
+{
+  // Check if initial pose override is specified
+  auto pose_name_it = hardware_info.hardware_parameters.find("initial_pose");
+  auto config_path_it = hardware_info.hardware_parameters.find("initial_pose_config");
+
+  if (pose_name_it == hardware_info.hardware_parameters.end() ||
+      config_path_it == hardware_info.hardware_parameters.end())
+  {
+    RCLCPP_INFO(logger_, "No initial pose override - using URDF defaults");
+    return false;
+  }
+
+  std::string pose_name = pose_name_it->second;
+  std::string config_path = config_path_it->second;
+
+  // Load YAML config with exception handling
+  YAML::Node config;
+  try
+  {
+    config = YAML::LoadFile(config_path);
+  }
+  catch (const YAML::Exception& e)
+  {
+    RCLCPP_ERROR(logger_, "Failed to load pose config '%s': %s",
+                 config_path.c_str(), e.what());
+    return false;
+  }
+
+  if (!config["poses"] || !config["poses"][pose_name])
+  {
+    RCLCPP_ERROR(logger_, "Pose '%s' not found in %s",
+                 pose_name.c_str(), config_path.c_str());
+    return false;
+  }
+
+  auto pose = config["poses"][pose_name];
+
+  RCLCPP_INFO(logger_, "Applying initial pose override: '%s'", pose_name.c_str());
+
+  // Set MuJoCo state (qpos, qvel) and keep joint_states in sync
+  int applied_count = 0;
+  for (auto &joint_state : joint_states_)
+  {
+    // Extract joint key from name (e.g., "openarm_joint2" -> "joint2")
+    // If "joint" not found, use the full joint name (e.g., "j1")
+    size_t pos = joint_state.name.find("joint");
+    std::string joint_key;
+    if (pos == std::string::npos)
+    {
+      // Use full joint name for simple names like "j1", "j2", etc.
+      joint_key = joint_state.name;
+    }
+    else
+    {
+      // Extract from "joint" onwards for names like "openarm_joint2"
+      joint_key = joint_state.name.substr(pos);
+    }
+
+    if (pose[joint_key])
+    {
+      double new_position = pose[joint_key].as<double>();
+
+      // Set position and velocity (part of MuJoCo state vector)
+      mj_data_->qpos[joint_state.mj_pos_adr] = new_position;
+      mj_data_->qvel[joint_state.mj_vel_adr] = 0.0;
+
+      // Keep joint_state in sync
+      joint_state.position = new_position;
+      joint_state.velocity = 0.0;
+      joint_state.position_command = new_position;
+      joint_state.velocity_command = 0.0;
+
+      RCLCPP_INFO(logger_, "  %s: %.3f rad (pos_cmd=%.3f)",
+                  joint_state.name.c_str(), new_position, joint_state.position_command);
+      applied_count++;
+    }
+  }
+
+  // Forward dynamics: propagate state through kinematics and compute derived quantities
+  // (body positions, Jacobians, sensor data, qacc, etc.)
+  mj_forward(mj_model_, mj_data_);
+
+  std::string description = "";
+  if (pose["description"].IsDefined())
+  {
+    description = pose["description"].as<std::string>();
+  }
+
+  RCLCPP_INFO(logger_, "Applied initial pose '%s': %s (%d joints)",
+              pose_name.c_str(), description.c_str(), applied_count);
+
+  // DIAGNOSTIC: Verify qpos was actually set correctly
+  RCLCPP_INFO(logger_, "VERIFY qpos after mj_forward: J2=%.4f, J4=%.4f",
+              mj_data_->qpos[joint_states_[1].mj_pos_adr],
+              mj_data_->qpos[joint_states_[3].mj_pos_adr]);
+
+  return true;  // Successfully applied pose override
 }
 
 void MujocoSystem::get_joint_limits(

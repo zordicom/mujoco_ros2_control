@@ -54,10 +54,11 @@ public:
     mjModel *mujoco_model, mjData *mujoco_data, const urdf::Model &urdf_model,
     const hardware_interface::HardwareInfo &hardware_info) override;
 
-  // Command mode switching support (called by controller manager)
+  // Command mode switching support (called by controller manager when controllers start/stop)
   hardware_interface::return_type prepare_command_mode_switch(
     const std::vector<std::string> &start_interfaces,
     const std::vector<std::string> &stop_interfaces) override;
+
   hardware_interface::return_type perform_command_mode_switch(
     const std::vector<std::string> &start_interfaces,
     const std::vector<std::string> &stop_interfaces) override;
@@ -90,7 +91,10 @@ public:
     int mj_joint_type;
     int mj_pos_adr;
     int mj_vel_adr;
-    int mj_actuator_id{-1};  // MuJoCo actuator ID for position_servo mode
+    // MuJoCo actuator IDs for multi-mode control
+    int mj_pos_actuator_id{-1};  // Position actuator ID
+    int mj_vel_actuator_id{-1};  // Velocity actuator ID
+    int mj_tau_actuator_id{-1};  // Torque (motor) actuator ID
 
     // Track which command interface is currently active (set via controller manager callbacks)
     bool position_command_active{false};
@@ -127,6 +131,7 @@ private:
   void register_sensors(
     const urdf::Model &urdf_model, const hardware_interface::HardwareInfo &hardware_info);
   void set_initial_pose();
+  bool apply_initial_pose_override(const hardware_interface::HardwareInfo &hardware_info);
   void get_joint_limits(
     urdf::JointConstSharedPtr urdf_joint, joint_limits::JointLimits &joint_limits);
   control_toolbox::Pid get_pid_gains(
@@ -147,13 +152,11 @@ private:
 
   // Control mode (deprecated - kept for backward compatibility)
   // Use current_motor_mode_ for actual mode selection
-  std::string control_mode_{"all"};
 
   // Current motor mode: dynamically switched based on active controller
   // "mit" - Full MIT mode (default, matches real hardware)
   // "position" - Position servo mode (MuJoCo actuators)
   // "effort" - Pure torque mode
-  std::string current_motor_mode_{"mit"};
 };
 }  // namespace mujoco_ros2_control
 

@@ -23,6 +23,7 @@ find_package(urdf REQUIRED)
 find_package(glfw3 REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(control_toolbox REQUIRED)
+find_package(yaml-cpp REQUIRED)
 
 set(THIS_PACKAGE_DEPENDS
   ament_cmake
@@ -57,7 +58,7 @@ endif()
 
 add_library(mujoco_system_plugins SHARED src/mujoco_system.cpp)
 ament_target_dependencies(mujoco_system_plugins ${THIS_PACKAGE_DEPENDS})
-target_link_libraries(mujoco_system_plugins ${MUJOCO_LIB})
+target_link_libraries(mujoco_system_plugins ${MUJOCO_LIB} yaml-cpp)
 target_include_directories(mujoco_system_plugins
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

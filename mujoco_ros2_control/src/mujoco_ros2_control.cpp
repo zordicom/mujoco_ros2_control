@@ -89,10 +89,9 @@ void MujocoRos2Control::init()
 {
   clock_publisher_ = node_->create_publisher<rosgraph_msgs::msg::Clock>("/clock", 10);
 
-  // Publish qfrc_bias for gravity compensation debugging (compare with Pinocchio)
+  // Publish qfrc_bias for gravity compensation validation
   qfrc_bias_publisher_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>(
     "/mujoco/qfrc_bias", 10);
-  RCLCPP_INFO(logger_, "Publishing qfrc_bias to /mujoco/qfrc_bias for gravity comp debugging");
 
   std::string urdf_string = this->get_robot_description();
 
@@ -131,8 +130,20 @@ void MujocoRos2Control::init()
     RCLCPP_ERROR(logger_, "Error while initializing URDF!");
   }
 
-  for (const auto &hardware : control_hardware_info)
+  for (auto &hardware : control_hardware_info)
   {
+    // Add initial pose parameters from node to hardware info
+    if (node_->has_parameter("initial_pose"))
+    {
+      hardware.hardware_parameters["initial_pose"] =
+        node_->get_parameter("initial_pose").as_string();
+    }
+    if (node_->has_parameter("initial_pose_config"))
+    {
+      hardware.hardware_parameters["initial_pose_config"] =
+        node_->get_parameter("initial_pose_config").as_string();
+    }
+
     std::string robot_hw_sim_type_str_ = hardware.hardware_class_type;
     std::unique_ptr<MujocoSystemInterface> mujoco_system;
     try
@@ -211,7 +222,24 @@ void MujocoRos2Control::init()
 
 void MujocoRos2Control::update()
 {
-  // Apply any active external wrench before stepping physics
+  // Compute current sim time BEFORE stepping (controls apply to upcoming step)
+  auto pre_time = mj_data_->time;
+  int pre_time_sec = static_cast<int>(pre_time);
+  int pre_time_nsec = static_cast<int>((pre_time - pre_time_sec) * 1000000000);
+  rclcpp::Time pre_time_ros(pre_time_sec, pre_time_nsec, RCL_ROS_TIME);
+  rclcpp::Duration pre_period = pre_time_ros - last_update_sim_time_ros_;
+
+  // Read state and update controllers before stepping
+  controller_manager_->read(pre_time_ros, pre_period);
+  controller_manager_->update(pre_time_ros, pre_period);
+
+  // First half-step (everything that depends on qpos)
+  mj_step1(mj_model_, mj_data_);
+
+  // Apply commands BETWEEN step1 and step2 so MuJoCo uses them in this step
+  controller_manager_->write(pre_time_ros, pre_period);
+
+  // Apply any active external wrench before finishing physics step (uses xfrc_applied)
   {
     std::lock_guard<std::mutex> lock(active_wrench_mutex_);
     if (active_wrench_.active && active_wrench_.body_id >= 0)
@@ -234,16 +262,6 @@ void MujocoRos2Control::update()
         xfrc[3] = static_cast<mjtNum>(active_wrench_.tx);
         xfrc[4] = static_cast<mjtNum>(active_wrench_.ty);
         xfrc[5] = static_cast<mjtNum>(active_wrench_.tz);
-
-        // Debug: Log when wrench is being applied (every 0.5s)
-        static double last_log_time = 0.0;
-        if (now - last_log_time > 0.5) {
-          RCLCPP_INFO(logger_,
-            "WRENCH ACTIVE: body_id=%d, F[%.2f,%.2f,%.2f] N, remaining=%.2fs",
-            active_wrench_.body_id, xfrc[0], xfrc[1], xfrc[2],
-            active_wrench_.end_time - now);
-          last_log_time = now;
-        }
       }
       else
       {
@@ -255,10 +273,7 @@ void MujocoRos2Control::update()
     }
   }
 
-  // Step simulation first to advance physics
-  mj_step1(mj_model_, mj_data_);
-
-  // Now read the NEW simulation time after stepping
+  // Now read the NEW simulation time after completing step
   auto sim_time = mj_data_->time;
   int sim_time_sec = static_cast<int>(sim_time);
   int sim_time_nanosec = static_cast<int>((sim_time - sim_time_sec) * 1000000000);
@@ -269,20 +284,14 @@ void MujocoRos2Control::update()
   // Publish clock AFTER stepping, so published time matches current simulation state
   publish_sim_time(sim_time_ros);
 
-  if (sim_period >= control_period_)
-  {
-    controller_manager_->read(sim_time_ros, sim_period);
-    controller_manager_->update(sim_time_ros, sim_period);
+  // Record last control time based on post-step time
+  if (sim_period >= control_period_) {
     last_update_sim_time_ros_ = sim_time_ros;
   }
 
-  // use same time as for read and update call - this is how it is done in ros2_control_node
-  controller_manager_->write(sim_time_ros, sim_period);
-
   mj_step2(mj_model_, mj_data_);
 
-  // Publish qfrc_bias for debugging (after mj_step2 which computes it)
-  // This allows gravity compensation controller to compare Pinocchio vs MuJoCo
+  // Publish qfrc_bias for validation (computed by mj_step2)
   std_msgs::msg::Float64MultiArray qfrc_bias_msg;
   qfrc_bias_msg.data.resize(mj_model_->nv);
   for (int i = 0; i < mj_model_->nv; i++)

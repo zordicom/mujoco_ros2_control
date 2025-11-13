@@ -1,0 +1,55 @@
+# 1-DOF Gravity Compensation Test Configuration
+#
+# Tests zordi_mit_controller with gravity compensation on vertical pendulum.
+# Expected: Pendulum holds upright position (q=0) without falling.
+
+controller_manager:
+  ros__parameters:
+    update_rate: 1000  # 1kHz to match timestep=0.001
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    zordi_mit_controller:
+      type: zordi_mit_controller/ZordiMITController
+
+joint_state_broadcaster:
+  ros__parameters:
+    publish_rate: 100
+
+# Zordi MIT Controller with Gravity Compensation
+zordi_mit_controller:
+  ros__parameters:
+    joints:
+      - j1
+    
+    # MIT mode: claim all three interfaces
+    command_interfaces:
+      - position
+      - velocity
+      - effort
+    
+    state_interfaces:
+      - position
+      - velocity
+    
+    # ENABLE gravity compensation (this is what we're testing!)
+    use_gravity_compensation: true
+    
+    # Tolerances
+    constraints:
+      stopped_velocity_tolerance: 0.05
+      goal_time: 2.0
+    
+    j1:
+      trajectory: 0.1
+      goal: 0.05
+
+# Physics for this pendulum:
+#   Mass: 1.0 kg
+#   COM: 0.5 m below pivot
+#   Max gravity torque: τ_g = m*g*r = 1.0*9.81*0.5 = 4.9 Nm (when horizontal)
+#
+# Without gravity comp: pendulum will fall to q=-π/2 (hanging down)
+# With gravity comp: pendulum holds at q=0 (upright)
+

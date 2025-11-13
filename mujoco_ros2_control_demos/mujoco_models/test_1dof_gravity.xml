@@ -1,0 +1,56 @@
+<mujoco model="test_1dof_gravity">
+  <compiler angle="radian" meshdir="." autolimits="true"/>
+  
+  <option timestep="0.001" gravity="0 0 -9.81"/>
+
+  <!-- Set initial position at 0.5 rad where gravity has significant effect -->
+  <keyframe>
+    <key name="test_pose" qpos="0.5"/>
+  </keyframe>
+
+  <asset>
+    <texture name="grid" type="2d" builtin="checker" width="512" height="512" rgb1="0.1 0.2 0.3" rgb2="0.2 0.3 0.4"/>
+    <material name="grid" texture="grid" texrepeat="1 1" texuniform="true" reflectance="0.2"/>
+  </asset>
+
+  <worldbody>
+    <light diffuse=".5 .5 .5" pos="0 0 3" dir="0 0 -1"/>
+    <geom name="floor" type="plane" size="10 10 0.05" material="grid"/>
+    
+    <!-- Vertical pendulum -->
+    <body name="pendulum" pos="0 0 1">
+      <!-- Visual: vertical bar -->
+      <geom name="pendulum_vis" type="box" size="0.025 0.025 0.25" 
+            pos="0 0 -0.25" rgba="0 0 1 1" mass="0"/>
+      
+      <!-- Inertial body at COM (0.5m below pivot) -->
+      <body name="pendulum_com" pos="0 0 -0.5">
+        <inertial pos="0 0 0" mass="1.0" 
+                  diaginertia="0.0833 0.0833 0.001"/>
+        <!-- Small visual marker at COM -->
+        <geom name="com_marker" type="sphere" size="0.03" 
+              rgba="1 0 0 1" mass="0"/>
+      </body>
+      
+      <!-- Joint at pivot (rotates about Y-axis) -->
+      <joint name="j1" type="hinge" axis="0 1 0" range="-1.57 1.57" damping="0.1"/>
+    </body>
+  </worldbody>
+  
+  <actuator>
+    <!-- Position actuator -->
+    <position name="act_pos_j1" joint="j1"
+              kp="100.0" kv="0.0"
+              ctrlrange="-1.57 1.57" forcerange="-30 30"/>
+    
+    <!-- Velocity actuator -->
+    <velocity name="act_vel_j1" joint="j1"
+              kv="10.0"
+              ctrlrange="-2.0 2.0" forcerange="-30 30"/>
+    
+    <!-- Torque actuator -->
+    <motor name="act_tau_j1" joint="j1"
+           ctrlrange="-30 30" forcerange="-30 30"/>
+  </actuator>
+</mujoco>
+

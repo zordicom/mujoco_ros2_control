@@ -1,0 +1,5 @@
+poses:
+  test_pose:
+    j1: 0.5
+    description: "Pendulum at 0.5 rad for gravity comp testing"
+
