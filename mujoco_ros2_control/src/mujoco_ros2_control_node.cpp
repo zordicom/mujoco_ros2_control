@@ -41,10 +41,18 @@ int main(int argc, const char **argv)
     rclcpp::NodeOptions().automatically_declare_parameters_from_overrides(true));
 
   RCLCPP_INFO_STREAM(node->get_logger(), "Initializing mujoco_ros2_control node...");
+  
+  // Declare required parameters with defaults (if not already declared)
+  if (!node->has_parameter("headless")) {
+    node->declare_parameter("headless", false);
+  }
+  if (!node->has_parameter("use_sim_time")) {
+    node->declare_parameter("use_sim_time", true);
+  }
+  
   auto model_path = node->get_parameter("mujoco_model_path").as_string();
 
   // Check if headless mode is enabled (no viewer window)
-  // Note: Parameter is automatically declared via automatically_declare_parameters_from_overrides(true)
   bool headless = node->get_parameter("headless").as_bool();
   if (headless)
   {

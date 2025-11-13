@@ -146,7 +146,31 @@ hardware_interface::return_type MujocoSystem::write(
       else
       {
         // Neutralize: either not claimed or MIT mode
+        // WARNING: This neutralization (ctrl = q) assumes kv=0 for the position actuator.
+        // If kv != 0, the position actuator will produce damping torque: τ = -kv*qd
         mj_data_->ctrl[joint_state.mj_pos_actuator_id] = q;
+
+        // Check if position interface is exposed but not active, and kv != 0
+        if (joint_state.is_position_control_enabled &&
+            !joint_state.position_command_active &&
+            !joint_state.warned_about_position_kv)
+        {
+          // For MuJoCo position actuators: gainprm[0] = kp, gainprm[1] = kv
+          // Access: actuator_gainprm[actuator_id * mjNGAIN + param_index]
+          const int act_id = joint_state.mj_pos_actuator_id;
+          const double kv = mj_model_->actuator_gainprm[act_id * 10 + 1];  // mjNGAIN = 10
+
+          if (std::abs(kv) > 1e-6)
+          {
+            RCLCPP_WARN(
+              logger_,
+              "Joint '%s': Position actuator has kv=%.3f but position interface is not active. "
+              "This will introduce unwanted damping torque (τ = -%.3f * qd) during neutralization. "
+              "For proper MIT mode operation, set kv=0.0 in the MuJoCo model.",
+              joint_state.name.c_str(), kv, kv);
+            joint_state.warned_about_position_kv = true;
+          }
+        }
       }
     }
 
@@ -386,8 +410,8 @@ void MujocoSystem::register_joints(
       }
     }
 
-    // Validate that URDF command interfaces match available MuJoCo actuators
-    // This prevents silent failures where controllers claim interfaces but have no actuators
+    // Check which command interfaces are declared in URDF
+    // Used for both validation and MIT mode compatibility checks
     bool has_position_interface = false;
     bool has_velocity_interface = false;
     bool has_effort_interface = false;
@@ -402,6 +426,25 @@ void MujocoSystem::register_joints(
       }
       if (command_if.name == hardware_interface::HW_IF_EFFORT) {
         has_effort_interface = true;
+      }
+    }
+
+    // Validate position actuator kv parameter for MIT mode compatibility
+    // Only warn if BOTH effort and position interfaces are exposed (indicating MIT mode usage)
+    if (joint_state.mj_pos_actuator_id >= 0 && has_effort_interface)
+    {
+      // For MuJoCo position actuators: gainprm[0] = kp, gainprm[1] = kv
+      const int act_id = joint_state.mj_pos_actuator_id;
+      const double kv = mj_model_->actuator_gainprm[act_id * 10 + 1];  // mjNGAIN = 10
+
+      if (std::abs(kv) > 1e-6)
+      {
+        RCLCPP_WARN(
+          logger_,
+          "Joint '%s': Position actuator has kv=%.3f but effort interface is also exposed. "
+          "During MIT mode (when position actuator is neutralized), this will cause "
+          "unwanted damping (τ = -%.3f * qd). For MIT mode compatibility, set kv=0.0.",
+          joint.name.c_str(), kv, kv);
       }
     }
 

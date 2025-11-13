@@ -39,8 +39,8 @@ def generate_launch_description():
                 {{'robot_description': robot_description}},
                 {{'mujoco_model_path': mujoco_model_path}},
                 {{'headless': True}},
-                {{'use_sim_time': True}},
-                {{'update_rate': 1000}},
+                # use_sim_time defaults to True (set in node)
+                # update_rate auto-computed from MuJoCo timestep
             ],
         )
     ])

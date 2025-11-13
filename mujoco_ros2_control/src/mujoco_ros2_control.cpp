@@ -183,10 +183,17 @@ void MujocoRos2Control::init()
   // Add main node to executor so its services (e.g., apply_external_wrench) can respond
   cm_executor_->add_node(node_->get_node_base_interface());
 
+  // Auto-compute update_rate from MuJoCo timestep if not explicitly set
   if (!controller_manager_->has_parameter("update_rate"))
   {
-    RCLCPP_ERROR_STREAM(logger_, "controller manager doesn't have an update_rate parameter");
-    return;
+    // Derive update rate from MuJoCo model timestep
+    // MuJoCo timestep (e.g., 0.001s) → update_rate (e.g., 1000 Hz)
+    int auto_update_rate = static_cast<int>(1.0 / mj_model_->opt.timestep);
+    controller_manager_->declare_parameter("update_rate", auto_update_rate);
+    RCLCPP_INFO(
+      logger_,
+      "Auto-set controller update_rate=%d Hz from MuJoCo timestep=%.6f s",
+      auto_update_rate, mj_model_->opt.timestep);
   }
 
   auto update_rate = controller_manager_->get_parameter("update_rate").as_int();
