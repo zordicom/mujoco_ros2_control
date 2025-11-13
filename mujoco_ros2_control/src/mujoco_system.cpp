@@ -155,10 +155,13 @@ hardware_interface::return_type MujocoSystem::write(
             !joint_state.position_command_active &&
             !joint_state.warned_about_position_kv)
         {
-          // For MuJoCo position actuators: gainprm[0] = kp, gainprm[1] = kv
-          // Access: actuator_gainprm[actuator_id * mjNGAIN + param_index]
           const int act_id = joint_state.mj_pos_actuator_id;
-          const double kv = mj_model_->actuator_gainprm[act_id * 10 + 1];  // mjNGAIN = 10
+
+          // Read kv using same logic as initialization
+          // For biastype=1: kv = -biasprm[2], otherwise kv = gainprm[1]
+          const double kv = (mj_model_->actuator_biastype[act_id] == 1) ?
+                            -mj_model_->actuator_biasprm[act_id * 10 + 2] :
+                            mj_model_->actuator_gainprm[act_id * 10 + 1];
 
           if (std::abs(kv) > 1e-6)
           {
@@ -433,9 +436,18 @@ void MujocoSystem::register_joints(
     // Only warn if BOTH effort and position interfaces are exposed (indicating MIT mode usage)
     if (joint_state.mj_pos_actuator_id >= 0 && has_effort_interface)
     {
-      // For MuJoCo position actuators: gainprm[0] = kp, gainprm[1] = kv
       const int act_id = joint_state.mj_pos_actuator_id;
-      const double kv = mj_model_->actuator_gainprm[act_id * 10 + 1];  // mjNGAIN = 10
+
+      // Read kv parameter from MuJoCo actuator
+      // For position actuators with biastype=1 (affine bias):
+      //   Control law: τ = kp*(ctrl - q) + bias[0] + bias[1]*q + bias[2]*qd
+      //   To match: τ = kp*(ctrl - q) - kv*qd
+      //   MuJoCo sets: bias[1] = -kp, bias[2] = -kv
+      //   So: kv = -biasprm[2]
+      // For other bias types: kv is in gainprm[1]
+      const double kv = (mj_model_->actuator_biastype[act_id] == 1) ?
+                        -mj_model_->actuator_biasprm[act_id * 10 + 2] :
+                        mj_model_->actuator_gainprm[act_id * 10 + 1];
 
       if (std::abs(kv) > 1e-6)
       {

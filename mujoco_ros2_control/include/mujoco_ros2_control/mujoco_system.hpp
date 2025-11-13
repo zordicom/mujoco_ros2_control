@@ -100,6 +100,9 @@ public:
     bool position_command_active{false};
     bool velocity_command_active{false};
     bool effort_command_active{false};
+
+    // Warning flag to avoid spamming logs about kv != 0 in neutralized position actuators
+    bool warned_about_position_kv{false};
   };
 
   template <typename T>

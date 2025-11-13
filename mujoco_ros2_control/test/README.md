@@ -65,6 +65,54 @@ The test should **PASS** by verifying that:
 - **MuJoCo**: Defines all three actuators
 - **Result**: SUCCESS - system initializes
 
+## Test: Non-Zero kv Warning
+
+### Purpose
+
+Verifies that the system correctly warns when position actuators have non-zero damping (`kv ≠ 0`), which can cause unwanted velocity-dependent torques during neutralization.
+
+### Test Files
+
+- `test_robot_nonzero_kv.urdf` - URDF declaring position, velocity, and effort interfaces
+- `test_robot_nonzero_kv.xml` - MuJoCo model with position actuator having `kv=5.0` (non-zero)
+- `test_kv_warning.py` - Test script that verifies the warning is emitted
+
+### Running the Test
+
+```bash
+# From this directory
+cd /home/gilwoo/ros2_ws/src/mujoco_ros2_control/mujoco_ros2_control/test
+
+# Source ROS2
+source /opt/ros/humble/setup.bash
+source ~/ros2_ws/install/setup.bash
+
+# Run the test
+./test_kv_warning.py
+```
+
+### Expected Behavior
+
+The test should **PASS** by verifying that:
+
+1. System initializes successfully (no fatal errors)
+2. Warning is emitted during initialization:
+
+   ```
+   [WARN] Joint 'test_joint1': Position actuator has kv=5.000 (non-zero damping).
+   This may cause unwanted damping during actuator neutralization (MIT mode, startup).
+   Recommend setting kv=0.0 in MuJoCo model for cleaner mode switching.
+   ```
+
+### Background
+
+When a position actuator is neutralized (set to current position), the MuJoCo control law becomes:
+```
+τ = kp*(q - q) - kv*qd = -kv*qd
+```
+
+If `kv ≠ 0`, this produces unwanted velocity damping that interferes with MIT mode torque control. The system warns about this configuration to help users identify potential issues.
+
 ## Adding More Tests
 
 To test other mismatch scenarios:
