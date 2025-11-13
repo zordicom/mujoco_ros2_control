@@ -402,17 +402,6 @@ void MujocoSystem::register_joints(
                 joint_state.mj_vel_actuator_id,
                 joint_state.mj_tau_actuator_id);
 
-    // Backward compatibility: check old naming scheme if new names not found
-    if (joint_state.mj_pos_actuator_id < 0) {
-      std::string old_actuator_name = "actuator_" + joint.name;
-      int old_actuator_id = mj_name2id(mj_model_, mjOBJ_ACTUATOR, old_actuator_name.c_str());
-      if (old_actuator_id >= 0) {
-        joint_state.mj_pos_actuator_id = old_actuator_id;
-        RCLCPP_WARN(logger_, "Using legacy actuator naming for joint '%s' (actuator_%s)",
-                    joint.name.c_str(), joint.name.c_str());
-      }
-    }
-
     // Check which command interfaces are declared in URDF
     // Used for both validation and MIT mode compatibility checks
     bool has_position_interface = false;
