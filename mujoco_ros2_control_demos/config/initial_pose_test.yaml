@@ -3,3 +3,22 @@ poses:
     j1: 0.5
     description: "Pendulum at 0.5 rad for gravity comp testing"
 
+  home:
+    j1: 0.0
+    description: "Home position - pendulum upright"
+
+  pos_small:
+    j1: 0.5
+    description: "Small positive angle"
+
+  pos_large:
+    j1: 1.0
+    description: "Large positive angle"
+
+  neg_small:
+    j1: -0.5
+    description: "Small negative angle"
+
+  neg_large:
+    j1: -1.0
+    description: "Large negative angle"

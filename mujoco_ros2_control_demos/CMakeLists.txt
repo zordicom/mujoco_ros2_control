@@ -31,7 +31,15 @@ install(DIRECTORY
   config
   urdf
   mujoco_models
+  docs
   DESTINATION share/${PROJECT_NAME}/
+)
+
+# Install scripts with execute permissions
+install(PROGRAMS
+  scripts/test_1dof_multimode_scenario_a.py
+  scripts/test_1dof_multimode_scenario_b.py
+  DESTINATION share/${PROJECT_NAME}/scripts
 )
 
 add_executable(example_position examples/example_position.cpp)

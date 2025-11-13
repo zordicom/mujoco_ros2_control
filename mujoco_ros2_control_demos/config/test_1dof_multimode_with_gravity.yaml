@@ -1,0 +1,91 @@
+# Copyright 2025 Zordi, Inc. All rights reserved.
+#
+# Controller configuration for testing multimode control on 1-DOF vertical pendulum with gravity.
+# Tests joint_trajectory_controller (position+velocity) and zordi_mit_controller (position+velocity+effort with gravity compensation).
+
+controller_manager:
+  ros__parameters:
+    update_rate: 1000  # Hz - Match MuJoCo's 1ms timestep
+
+    # Controllers to be loaded
+    joint_trajectory_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+    zordi_mit_controller:
+      type: zordi_mit_controller/ZordiMITController
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+joint_state_broadcaster:
+  ros__parameters:
+    publish_rate: 100  # Hz
+
+# Joint Trajectory Controller
+# Claims: position + velocity interfaces
+# Triggers position actuator + velocity actuator in mujoco_system.cpp
+joint_trajectory_controller:
+  ros__parameters:
+    joints:
+      - j1
+
+    # Command interfaces: position + velocity (no effort)
+    command_interfaces:
+      - position
+      - velocity
+
+    # State interfaces
+    state_interfaces:
+      - position
+      - velocity
+
+    allow_partial_joints_goal: false
+    open_loop_control: false
+    allow_integration_in_goal_trajectories: true
+
+    # Tolerances
+    constraints:
+      stopped_velocity_tolerance: 0.05  # rad/s
+      goal_time: 0.5  # Allow 0.5s settling time
+
+    # Per-joint position tolerances (rad)
+    j1: {trajectory: 0.05, goal: 0.01}
+
+# Zordi MIT Controller
+# Claims: position + velocity + effort interfaces
+# Triggers MIT mode in mujoco_system.cpp:
+#   - Position/velocity actuators neutralized (ctrl_pos=q, ctrl_vel=qd)
+#   - Torque actuator driven with: τ = Kp*(pos_cmd-q) + Kd*(vel_cmd-qd) + effort_cmd
+zordi_mit_controller:
+  ros__parameters:
+    joints:
+      - j1
+
+    # Command all three interfaces - triggers MIT mode
+    command_interfaces:
+      - position  # Hardware: Adds Kp*(pos_cmd - pos)
+      - velocity  # Hardware: Adds Kd*(vel_cmd - vel)
+      - effort    # Hardware: Adds effort_cmd directly
+
+    state_interfaces:
+      - position
+      - velocity
+
+    use_gravity_compensation: true  # ENABLED for vertical pendulum testing
+
+    # Tolerances
+    constraints:
+      stopped_velocity_tolerance: 0.05  # rad/s
+      goal_time: 0.5  # Allow 0.5s settling time
+
+    # Per-joint position tolerances (rad)
+    j1: {trajectory: 0.05, goal: 0.01}
+
+# Physics for this pendulum:
+#   Mass: 1.0 kg
+#   COM: 0.5 m below pivot
+#   Max gravity torque: τ_g = m*g*r = 1.0*9.81*0.5 = 4.9 Nm (when horizontal)
+#
+# Test scenarios:
+#   A) Use JTC to move, then switch to zordi_mit to hold with gravity comp
+#   B) Use zordi_mit for both moving and holding with gravity comp
