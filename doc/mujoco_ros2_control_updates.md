@@ -408,9 +408,9 @@ void MujocoRos2Control::update()
 
 ```
 # Apply external wrench (force + torque) to a MuJoCo body for testing
+# Note: Wrench must be expressed in world frame
 string body_name              # Name of the body to apply wrench to
-geometry_msgs/Wrench wrench   # Wrench to apply (force + torque)
-bool in_world_frame           # If true, wrench is in world frame; if false, in body frame
+geometry_msgs/Wrench wrench   # Wrench to apply (force + torque) in world frame
 float64 duration              # Duration to apply the wrench (seconds)
 ---
 bool accepted                 # True if the wrench was accepted
@@ -423,6 +423,7 @@ string message                # Status message
 - Thread-safe with mutex protection
 - Automatic expiration after duration
 - Applied between `mj_step1` and `mj_step2` in update loop
+- **Note:** Wrenches must be expressed in world frame
 
 #### Usage Example
 
@@ -558,12 +559,14 @@ void MujocoRos2Control::publish_sim_time(rclcpp::Time sim_time)
 
 1. **URDF/MuJoCo Validation Test**
    - File: `test_validation.py`
-   - Purpose: Verify mismatch detection between URDF and MuJoCo actuators
+   - Purpose: Verify mismatch detection (built into `mujoco_system.cpp` lines 452-482)
+   - Tests that system throws error when URDF declares interfaces without corresponding MuJoCo actuators
    - Expected: Throws error with clear message
 
 2. **KV Warning Test**
    - File: `test_kv_warning.py`
-   - Purpose: Verify warning for non-zero kv in position actuators
+   - Purpose: Verify KV warning system (built into `mujoco_system.cpp` lines 424-450)
+   - Tests that system warns when position actuators have non-zero kv with effort interface exposed
    - Expected: Emits warning during initialization
 
 3. **Manual Integration Tests**
@@ -707,9 +710,13 @@ No changes needed - controllers work as before. Mode switching happens automatic
 
 ---
 
+## Known Limitations
+
+None at this time.
+
 ## Future Work
 
-1. **Body-frame wrenches:** Currently external wrenches are world-frame only
+1. **Body-frame wrenches:** Add support for body-frame wrench application in `ApplyExternalWrench` service
 2. **Dynamic actuator gain tuning:** Runtime adjustment of kp/kv parameters
 3. **Sensor support:** Expand IMU and force-torque sensor capabilities
 4. **URDF loading:** Direct URDF to MuJoCo conversion (eliminate XML step)

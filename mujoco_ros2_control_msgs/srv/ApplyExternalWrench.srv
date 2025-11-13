@@ -1,7 +1,7 @@
 # Apply external wrench (force + torque) to a MuJoCo body for testing
+# Note: Wrench must be expressed in world frame
 string body_name              # Name of the body to apply wrench to
-geometry_msgs/Wrench wrench   # Wrench to apply (force + torque)
-bool in_world_frame           # If true, wrench is in world frame; if false, in body frame
+geometry_msgs/Wrench wrench   # Wrench to apply (force + torque) in world frame
 float64 duration              # Duration to apply the wrench (seconds)
 ---
 bool accepted                 # True if the wrench was accepted
