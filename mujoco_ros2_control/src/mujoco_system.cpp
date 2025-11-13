@@ -90,7 +90,7 @@ hardware_interface::return_type MujocoSystem::read(
 }
 
 hardware_interface::return_type MujocoSystem::write(
-  const rclcpp::Time & /* time */, const rclcpp::Duration &period)
+  const rclcpp::Time & /* time */, const rclcpp::Duration & /* period */)
 {
   // update mimic commands
   for (auto &joint_state : joint_states_)
@@ -242,8 +242,8 @@ hardware_interface::return_type MujocoSystem::write(
 }
 
 hardware_interface::return_type MujocoSystem::prepare_command_mode_switch(
-  const std::vector<std::string> &start_interfaces,
-  const std::vector<std::string> &stop_interfaces)
+  const std::vector<std::string> & /* start_interfaces */,
+  const std::vector<std::string> & /* stop_interfaces */)
 {
   // Validate that the requested interface combination is feasible
   // In actuator-centric design, we accept any combination and handle it dynamically

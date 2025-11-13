@@ -41,7 +41,7 @@ int main(int argc, const char **argv)
     rclcpp::NodeOptions().automatically_declare_parameters_from_overrides(true));
 
   RCLCPP_INFO_STREAM(node->get_logger(), "Initializing mujoco_ros2_control node...");
-  
+
   // Declare required parameters with defaults (if not already declared)
   if (!node->has_parameter("headless")) {
     node->declare_parameter("headless", false);
@@ -49,7 +49,7 @@ int main(int argc, const char **argv)
   if (!node->has_parameter("use_sim_time")) {
     node->declare_parameter("use_sim_time", true);
   }
-  
+
   auto model_path = node->get_parameter("mujoco_model_path").as_string();
 
   // Check if headless mode is enabled (no viewer window)
@@ -109,8 +109,6 @@ int main(int argc, const char **argv)
   // run main loop with REAL-TIME SYNCHRONIZATION
   // Physics runs at model timestep rate (typically 1000 Hz = 1ms per step)
   // Each physics step is throttled to maintain 1:1 sim time to real time ratio
-
-  mjtNum last_cam_update = mujoco_data->time;
 
   // Get physics timestep from model
   const double physics_timestep = mujoco_model->opt.timestep;  // seconds
@@ -214,7 +212,6 @@ int main(int argc, const char **argv)
       if (++camera_counter >= camera_interval)
       {
         cameras->update(mujoco_model, mujoco_data);
-        last_cam_update = mujoco_data->time;
         camera_counter = 0;
       }
 
