@@ -119,7 +119,7 @@ hardware_interface::return_type MujocoSystem::write(
 
     // Determine if MIT mode is active (position/velocity commands with effort)
     // In MIT mode, we neutralize position/velocity actuators and drive torque actuator with PD
-    // 
+    //
     // Use *_command_active flags set by perform_command_mode_switch() to detect
     // which interfaces are actually claimed by controllers (not just exposed)
     bool mit_mode = joint_state.effort_command_active &&
@@ -384,6 +384,57 @@ void MujocoSystem::register_joints(
         RCLCPP_WARN(logger_, "Using legacy actuator naming for joint '%s' (actuator_%s)",
                     joint.name.c_str(), joint.name.c_str());
       }
+    }
+
+    // Validate that URDF command interfaces match available MuJoCo actuators
+    // This prevents silent failures where controllers claim interfaces but have no actuators
+    bool has_position_interface = false;
+    bool has_velocity_interface = false;
+    bool has_effort_interface = false;
+
+    for (const auto &command_if : joint.command_interfaces)
+    {
+      if (command_if.name.find(hardware_interface::HW_IF_POSITION) != std::string::npos) {
+        has_position_interface = true;
+      }
+      if (command_if.name.find(hardware_interface::HW_IF_VELOCITY) != std::string::npos) {
+        has_velocity_interface = true;
+      }
+      if (command_if.name == hardware_interface::HW_IF_EFFORT) {
+        has_effort_interface = true;
+      }
+    }
+
+    // Check for mismatches and fail initialization
+    if (has_position_interface && joint_state.mj_pos_actuator_id < 0) {
+      RCLCPP_ERROR(
+        logger_,
+        "Joint '%s' declares position interface in URDF but no 'act_pos_%s' "
+        "actuator found in MuJoCo model. Please add the actuator or remove the interface.",
+        joint.name.c_str(), joint.name.c_str());
+      throw std::runtime_error(
+        "URDF/MuJoCo mismatch: position interface without actuator for joint " + joint.name);
+    }
+
+    if (has_velocity_interface && joint_state.mj_vel_actuator_id < 0) {
+      RCLCPP_ERROR(
+        logger_,
+        "Joint '%s' declares velocity interface in URDF but no 'act_vel_%s' "
+        "actuator found in MuJoCo model. Please add the actuator or remove the interface.",
+        joint.name.c_str(), joint.name.c_str());
+      throw std::runtime_error(
+        "URDF/MuJoCo mismatch: velocity interface without actuator for joint " + joint.name);
+    }
+
+    if (has_effort_interface && joint_state.mj_tau_actuator_id < 0) {
+      RCLCPP_ERROR(
+        logger_,
+        "Joint '%s' declares effort interface in URDF but no 'act_tau_%s' "
+        "actuator found in MuJoCo model. Please add the actuator or remove the interface. "
+        "MIT mode requires all three actuators (position, velocity, effort).",
+        joint.name.c_str(), joint.name.c_str());
+      throw std::runtime_error(
+        "URDF/MuJoCo mismatch: effort interface without actuator for joint " + joint.name);
     }
 
     joint_states_.at(joint_index) = joint_state;
