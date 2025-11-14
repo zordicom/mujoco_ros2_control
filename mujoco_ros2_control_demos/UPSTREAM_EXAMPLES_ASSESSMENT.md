@@ -11,6 +11,7 @@
 **🔴 CRITICAL: All upstream examples are BROKEN and will fail to launch.**
 
 The actuator-centric control design implemented in this branch requires that:
+
 1. Each command interface declared in URDF must have a corresponding actuator in the MuJoCo model
 2. Actuators must follow naming convention: `act_pos_{joint}`, `act_vel_{joint}`, `act_tau_{joint}`
 
@@ -59,6 +60,7 @@ joint {joint_name}
 ### Example: cart_example_position
 
 **URDF declares:**
+
 ```xml
 <joint name="slider_to_cart">
   <command_interface name="position" />
@@ -67,6 +69,7 @@ joint {joint_name}
 ```
 
 **MuJoCo model (`test_cart.xml`) has:**
+
 ```xml
 <mujoco>
   ...
@@ -75,6 +78,7 @@ joint {joint_name}
 ```
 
 **Expected validation error:**
+
 ```
 [ERROR] Joint 'slider_to_cart' declares position interface in URDF but no
 'act_pos_slider_to_cart' actuator found in MuJoCo model.
@@ -95,11 +99,13 @@ if (has_position_interface && joint_state.mj_pos_actuator_id < 0) {
 ```
 
 This validation ensures that:
+
 1. Controllers can't claim interfaces without corresponding actuators
 2. Actuator neutralization works correctly (preventing interference)
 3. MIT mode can properly compose PD + feedforward torques
 
 **Previous behavior:** These examples may have worked if there was:
+
 - No validation (actuators were optional)
 - Default actuator creation
 - Different control architecture
@@ -133,6 +139,7 @@ Each broken example needs its MuJoCo XML file updated with proper actuators.
 ```
 
 For diff_drive with 2 wheels:
+
 ```xml
 <actuator>
   <velocity name="act_vel_left_wheel_joint" joint="left_wheel_joint" kv="10.0"/>
@@ -173,11 +180,13 @@ If a URDF declares multiple interfaces (for potential MIT mode), need ALL three 
 ### Option 1: Fix All Examples (Comprehensive)
 
 **Pros:**
+
 - All upstream examples work
 - Maintains feature parity
 - Good for users migrating from upstream
 
 **Cons:**
+
 - Time-consuming (10 examples to fix)
 - Need to test each one
 - May need to adjust controller configs
@@ -187,16 +196,19 @@ If a URDF declares multiple interfaces (for potential MIT mode), need ALL three 
 ### Option 2: Document as Breaking Change
 
 **Pros:**
+
 - Quick solution
 - Focus on new examples (test_1dof_gravity)
 - Users can fix as needed
 
 **Cons:**
+
 - Breaks existing workflows
 - Poor user experience
 - Appears incomplete
 
 **Implementation:**
+
 1. Add `BREAKING_CHANGES.md` documenting the issue
 2. Add warning to main README
 3. Provide clear fix instructions
@@ -213,11 +225,13 @@ done
 ```
 
 **Pros:**
+
 - Fast (automated)
 - Consistent actuator setup
 - Ensures proper naming
 
 **Cons:**
+
 - May overwrite custom MuJoCo settings
 - Need to verify each output
 - Script may not handle all cases
@@ -231,11 +245,13 @@ done
 **Use Option 3 (Automated Fix) with verification:**
 
 1. **Backup existing models**
+
    ```bash
    cp -r mujoco_models mujoco_models.backup
    ```
 
 2. **Regenerate with proper actuators**
+
    ```bash
    # Use urdf_to_mjcf.py with proper flags
    python3 scripts/urdf_to_mjcf.py urdf/test_cart_position.xacro.urdf \
@@ -243,6 +259,7 @@ done
    ```
 
 3. **Test each example**
+
    ```bash
    ros2 launch mujoco_ros2_control_demos cart_example_position.launch.py
    ```
@@ -278,6 +295,7 @@ After fixes, verify each example:
 ## Files Requiring Changes
 
 ### MuJoCo Models (Primary Changes)
+
 - `mujoco_models/test_cart.xml` - Add actuators
 - `mujoco_models/test_vertical_cart.xml` - Add actuators
 - `mujoco_models/test_diff_drive.xml` - Add actuators (2 wheels)
@@ -287,9 +305,11 @@ After fixes, verify each example:
 - `mujoco_models/test_camera.xml` - Check if actuators needed
 
 ### Launch Files (Possible Changes)
+
 May need to update `mujoco_model_path` if we create separate XML files per example.
 
 ### Documentation (Required)
+
 - `README.md` - Add actuator requirements section
 - `BREAKING_CHANGES.md` - Document the requirement
 - Example READMEs - Update instructions
