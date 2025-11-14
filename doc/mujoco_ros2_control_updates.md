@@ -5,14 +5,23 @@
 ## Summary (Current Branch vs Main)
 
 **Branch:** `2025-11-control-interface`
-**Files Changed:** 42 files
-**Changes:** +4316 insertions, -72 deletions
+**Files Changed:** 47+ files
+**Changes:** +4480+ insertions, -73 deletions
 
 ---
 
 ## Overview
 
-This branch represents a complete architectural redesign of `mujoco_ros2_control` from global mode switching to **actuator-centric control**. The new design enables flexible multi-interface control, proper MIT mode support, and better alignment with real hardware behavior.
+This branch represents a complete architectural redesign of `mujoco_ros2_control` from global mode switching to **actuator-centric control**. The new design enables flexible multi-interface control, proper MIT mode support, better alignment with real hardware behavior, and improved simulation control capabilities.
+
+**Key additions:**
+
+- Actuator-centric control architecture (no global mode switching)
+- Runtime simulation control (pause/unpause/reset)
+- Initial keyframe configuration support
+- External wrench application service
+- Gravity compensation validation
+- Real-time synchronization fixes
 
 ---
 
@@ -26,16 +35,7 @@ This branch represents a complete architectural redesign of `mujoco_ros2_control
 
 #### Three Actuators Per Joint
 
-Each joint can have up to three independent actuators:
-
-```xml
-<!-- MuJoCo model -->
-<actuator>
-  <position name="act_pos_joint1" joint="joint1" kp="5000" kv="0"/>
-  <velocity name="act_vel_joint1" joint="joint1" kv="500"/>
-  <motor name="act_tau_joint1" joint="joint1" gear="1"/>
-</actuator>
-```
+Each joint can have up to three independent actuators in the MuJoCo model.
 
 **Naming convention:**
 
@@ -45,42 +45,17 @@ Each joint can have up to three independent actuators:
 
 #### JointState Structure
 
-```cpp
-struct JointState {
-  // ... existing fields ...
+The `JointState` struct tracks:
 
-  // MuJoCo actuator IDs
-  int mj_pos_actuator_id{-1};
-  int mj_vel_actuator_id{-1};
-  int mj_tau_actuator_id{-1};
-
-  // Dynamic interface activation tracking
-  bool position_command_active{false};
-  bool velocity_command_active{false};
-  bool effort_command_active{false};
-
-  // KV warning flag
-  bool warned_about_position_kv{false};
-};
-```
+- MuJoCo actuator IDs for each control type (position/velocity/torque)
+- Dynamic interface activation flags (`position_command_active`, `velocity_command_active`, `effort_command_active`)
+- KV warning status to avoid repeated warnings
 
 ---
 
 ### 2. Dynamic Interface Activation Tracking
 
 **New callbacks implemented:**
-
-```cpp
-hardware_interface::return_type prepare_command_mode_switch(
-  const std::vector<std::string> &start_interfaces,
-  const std::vector<std::string> &stop_interfaces) override;
-
-hardware_interface::return_type perform_command_mode_switch(
-  const std::vector<std::string> &start_interfaces,
-  const std::vector<std::string> &stop_interfaces) override;
-```
-
-**Behavior:**
 
 - `prepare_command_mode_switch()`: Validates requested interface combination (always accepts in actuator-centric design)
 - `perform_command_mode_switch()`: Updates `*_command_active` flags to track which interfaces are claimed by controllers
@@ -100,75 +75,24 @@ This enables proper MIT mode detection and actuator neutralization.
 
 **Core principle:** Drive or neutralize each actuator independently based on active interfaces
 
-```cpp
-hardware_interface::return_type MujocoSystem::write(
-  const rclcpp::Time &time, const rclcpp::Duration &period)
-{
-  for (auto &joint_state : joint_states_)
-  {
-    const double q = mj_data_->qpos[joint_state.mj_pos_adr];
-    const double qd = mj_data_->qvel[joint_state.mj_vel_adr];
+**MIT mode detection:** Effort interface active + (position OR velocity interface active)
 
-    // MIT mode detection
-    bool mit_mode = joint_state.effort_command_active &&
-                    (joint_state.position_command_active ||
-                     joint_state.velocity_command_active);
+**Position actuator logic:**
 
-    // Position actuator: command or neutralize
-    if (joint_state.mj_pos_actuator_id >= 0)
-    {
-      if (joint_state.position_command_active && !mit_mode)
-      {
-        // Pure position mode: drive position actuator
-        mj_data_->ctrl[joint_state.mj_pos_actuator_id] = position_cmd;
-      }
-      else
-      {
-        // Neutralize: ctrl = q (requires kv=0!)
-        mj_data_->ctrl[joint_state.mj_pos_actuator_id] = q;
-      }
-    }
+- If position active and not MIT mode: Drive with position command
+- Otherwise: Neutralize by setting ctrl = current_position (requires kv=0!)
 
-    // Velocity actuator: command or neutralize
-    if (joint_state.mj_vel_actuator_id >= 0)
-    {
-      if (joint_state.velocity_command_active && !mit_mode)
-      {
-        mj_data_->ctrl[joint_state.mj_vel_actuator_id] = vel_cmd;
-      }
-      else
-      {
-        // Neutralize: ctrl = qd
-        mj_data_->ctrl[joint_state.mj_vel_actuator_id] = qd;
-      }
-    }
+**Velocity actuator logic:**
 
-    // Torque actuator: MIT-style composition
-    if (joint_state.mj_tau_actuator_id >= 0)
-    {
-      if (joint_state.effort_command_active)
-      {
-        double tau_total = joint_state.effort_command;
+- If velocity active and not MIT mode: Drive with velocity command
+- Otherwise: Neutralize by setting ctrl = current_velocity
 
-        // Add PD terms if position/velocity interfaces also active
-        if (joint_state.position_command_active ||
-            joint_state.velocity_command_active)
-        {
-          double tau_pd = kp * (pos_cmd - q) + kd * (vel_cmd - qd);
-          tau_total += tau_pd;
-        }
+**Torque actuator logic:**
 
-        mj_data_->ctrl[joint_state.mj_tau_actuator_id] =
-          clamp(tau_total, -limit, limit);
-      }
-      else
-      {
-        mj_data_->ctrl[joint_state.mj_tau_actuator_id] = 0.0;
-      }
-    }
-  }
-}
-```
+- If effort active: Use effort command
+- If MIT mode: Add PD terms: τ_total = τ_ff + Kp*(q_cmd - q) + Kd*(qd_cmd - qd)
+- Apply torque limits
+- Otherwise: Set to 0.0
 
 ---
 
@@ -210,20 +134,11 @@ The actuator-centric design naturally supports multiple control modes without ex
 
 **Implementation:** During `register_joints()`, validate that each command interface in URDF has a corresponding actuator in MuJoCo model
 
-```cpp
-// Check for mismatches and fail initialization
-if (has_position_interface && joint_state.mj_pos_actuator_id < 0) {
-  RCLCPP_ERROR(
-    logger_,
-    "Joint '%s' declares position interface in URDF but no 'act_pos_%s' "
-    "actuator found in MuJoCo model. Please add the actuator or remove the interface.",
-    joint.name.c_str(), joint.name.c_str());
-  throw std::runtime_error(
-    "URDF/MuJoCo mismatch: position interface without actuator for joint " + joint.name);
-}
+**Error behavior:**
 
-// Similar checks for velocity and effort interfaces
-```
+- If position interface declared but no `act_pos_*` actuator found: Throw error
+- If velocity interface declared but no `act_vel_*` actuator found: Throw error
+- If effort interface declared but no `act_tau_*` actuator found: Throw error
 
 **Error messages:**
 
@@ -239,40 +154,22 @@ if (has_position_interface && joint_state.mj_pos_actuator_id < 0) {
 
 **Problem:**
 
-When a position actuator is neutralized (ctrl = q), the MuJoCo control law becomes:
-
-```
-τ = kp*(q - q) - kv*qd = -kv*qd
-```
+When a position actuator is neutralized (ctrl = q), the MuJoCo control law becomes: τ = kp*(q - q) - kv*qd = -kv*qd
 
 If `kv ≠ 0`, this produces unwanted velocity damping that interferes with MIT mode torque control.
 
 **Solution:**
 
-Warn during initialization if position actuator has non-zero kv and effort interface is exposed:
+Warn during initialization if position actuator has non-zero kv and effort interface is exposed.
 
-```cpp
-if (joint_state.mj_pos_actuator_id >= 0 && has_effort_interface)
-{
-  const double kv = /* read from actuator parameters */;
+**Warning message includes:**
 
-  if (std::abs(kv) > 1e-6)
-  {
-    RCLCPP_WARN(
-      logger_,
-      "Joint '%s': Position actuator has kv=%.3f but effort interface is also exposed. "
-      "During MIT mode (when position actuator is neutralized), this will cause "
-      "unwanted damping (τ = -%.3f * qd). For MIT mode compatibility, set kv=0.0.",
-      joint.name.c_str(), kv, kv);
-  }
-}
-```
+- Current kv value
+- Expected damping force magnitude
+- Recommendation to set kv=0.0 for MIT mode compatibility
 
 **Recommended configuration for MIT mode:**
-
-```xml
-<position name="act_pos_joint1" joint="joint1" kp="5000" kv="0"/>
-```
+Position actuators should have `kp="5000" kv="0"` (or appropriate kp value with kv=0)
 
 **Testing:** See `mujoco_ros2_control/test/test_kv_warning.py`
 
@@ -286,19 +183,7 @@ if (joint_state.mj_pos_actuator_id >= 0 && has_effort_interface)
 
 #### XML Keyframe Format
 
-Define keyframes in your MuJoCo XML model file:
-
-```xml
-<mujoco model="robot">
-  <keyframe>
-    <key name="home" qpos="0.0 0.0 0.0"/>
-    <key name="test_pose" qpos="0.5 -1.57 1.57"/>
-    <key name="crouch" qpos="-0.5 -0.8 -1.2"/>
-  </keyframe>
-
-  <!-- rest of model definition -->
-</mujoco>
-```
+Define keyframes in your MuJoCo XML model file within a `<keyframe>` tag.
 
 **Attributes:**
 
@@ -310,23 +195,7 @@ Define keyframes in your MuJoCo XML model file:
 
 #### Launch File Configuration
 
-Pass the keyframe name or index as a node parameter:
-
-```python
-mujoco_node = Node(
-    package="mujoco_ros2_control",
-    executable="mujoco_ros2_control",
-    parameters=[
-        {
-            "robot_description": robot_description,
-            "mujoco_model_path": str(mujoco_model),
-            "initial_keyframe": "test_pose",  # Name or index (e.g., "0")
-        },
-        controller_config,
-    ],
-    output="screen",
-)
-```
+Pass the keyframe name or index as a node parameter using `initial_keyframe` parameter. Can specify by name (e.g., "test_pose") or numeric index (e.g., "0").
 
 #### Behavior
 
@@ -339,14 +208,7 @@ mujoco_node = Node(
 
 #### Runtime Reset Service
 
-Reset to any keyframe during runtime:
-
-```bash
-ros2 service call /mujoco_ros2_control/reset_to_keyframe \
-  mujoco_ros2_control_msgs/srv/ResetToKeyframe "{keyframe: 'home'}"
-```
-
-Service accepts keyframe name (string) or numeric index.
+Reset to any keyframe during runtime using `/mujoco_ros2_control/reset_to_keyframe` service. Accepts keyframe name (string) or numeric index.
 
 #### Example
 
@@ -363,41 +225,16 @@ See `mujoco_ros2_control_demos` for complete examples:
 
 **Solution (new):** Reordered update loop to apply controls before physics step
 
-#### New Update Loop
+#### New Update Loop Order
 
-```cpp
-void MujocoRos2Control::update()
-{
-  // 1. Compute current sim time BEFORE stepping
-  auto pre_time = mj_data_->time;
-  rclcpp::Time pre_time_ros = to_ros_time(pre_time);
-  rclcpp::Duration pre_period = pre_time_ros - last_update_sim_time_ros_;
-
-  // 2. Read state and update controllers BEFORE stepping
-  controller_manager_->read(pre_time_ros, pre_period);
-  controller_manager_->update(pre_time_ros, pre_period);
-
-  // 3. First half-step (kinematics, collision detection)
-  mj_step1(mj_model_, mj_data_);
-
-  // 4. Apply commands BETWEEN step1 and step2
-  controller_manager_->write(pre_time_ros, pre_period);
-
-  // 5. Apply external wrenches (if any)
-  apply_active_external_wrench();
-
-  // 6. Second half-step (physics integration)
-  mj_step2(mj_model_, mj_data_);
-
-  // 7. Publish clock AFTER stepping
-  publish_sim_time(to_ros_time(mj_data_->time));
-
-  // 8. Update last control time
-  if (pre_period >= control_period_) {
-    last_update_sim_time_ros_ = to_ros_time(mj_data_->time);
-  }
-}
-```
+1. Compute current sim time BEFORE stepping
+2. Read state and update controllers BEFORE stepping
+3. First half-step (kinematics, collision detection) - `mj_step1`
+4. Apply commands BETWEEN step1 and step2 - `controller_manager->write`
+5. Apply external wrenches (if any)
+6. Second half-step (physics integration) - `mj_step2`
+7. Publish clock AFTER stepping
+8. Update last control time
 
 **Benefits:**
 
@@ -415,16 +252,18 @@ void MujocoRos2Control::update()
 
 #### Service Definition
 
-```
-# Apply external wrench (force + torque) to a MuJoCo body for testing
-# Note: Wrench must be expressed in world frame
-string body_name              # Name of the body to apply wrench to
-geometry_msgs/Wrench wrench   # Wrench to apply (force + torque) in world frame
-float64 duration              # Duration to apply the wrench (seconds)
----
-bool accepted                 # True if the wrench was accepted
-string message                # Status message
-```
+Service: `ApplyExternalWrench.srv`
+
+**Request fields:**
+
+- `body_name`: Name of the body to apply wrench to
+- `wrench`: Force + torque (geometry_msgs/Wrench) in world frame
+- `duration`: Duration to apply the wrench (seconds)
+
+**Response fields:**
+
+- `accepted`: True if the wrench was accepted
+- `message`: Status message
 
 #### Implementation
 
@@ -434,22 +273,6 @@ string message                # Status message
 - Applied between `mj_step1` and `mj_step2` in update loop
 - **Note:** Wrenches must be expressed in world frame
 
-#### Usage Example
-
-```python
-from mujoco_ros2_control_msgs.srv import ApplyExternalWrench
-from geometry_msgs.msg import Wrench
-
-client = node.create_client(ApplyExternalWrench, '/apply_external_wrench')
-
-request = ApplyExternalWrench.Request()
-request.body_name = 'link4'
-request.wrench.force.x = 10.0  # 10N in x direction
-request.duration = 2.0  # Apply for 2 seconds
-
-future = client.call_async(request)
-```
-
 **Use cases:**
 
 - Disturbance rejection testing
@@ -458,40 +281,15 @@ future = client.call_async(request)
 
 ---
 
-### 10. Python Viewer Support
-
-**Added:** Embedded Python MuJoCo viewer using `mujoco.viewer`
-
-**Files:**
-
-- `mujoco_ros2_control/include/mujoco_ros2_control/python_viewer.hpp`
-- `mujoco_ros2_control/src/python_viewer.cpp`
-
-**Dependencies:** Python 3.10+, `mujoco` Python package
-
-**Purpose:** Alternative to GLFW viewer with better Python integration
-
----
-
-### 11. Auto-Compute Update Rate
+### 10. Auto-Compute Update Rate
 
 **Previous:** Required manual `update_rate` parameter in controller manager config
 
 **Current:** Automatically computed from MuJoCo timestep if not explicitly set
 
-```cpp
-if (!controller_manager_->has_parameter("update_rate"))
-{
-  // Derive update rate from MuJoCo model timestep
-  // MuJoCo timestep (e.g., 0.001s) → update_rate (e.g., 1000 Hz)
-  int auto_update_rate = static_cast<int>(1.0 / mj_model_->opt.timestep);
-  controller_manager_->declare_parameter("update_rate", auto_update_rate);
-  RCLCPP_INFO(
-    logger_,
-    "Auto-set controller update_rate=%d Hz from MuJoCo timestep=%.6f s",
-    auto_update_rate, mj_model_->opt.timestep);
-}
-```
+**Computation:** `update_rate = 1.0 / mj_model->opt.timestep`
+
+- Example: MuJoCo timestep = 0.001s → update_rate = 1000 Hz
 
 **Benefits:**
 
@@ -501,20 +299,11 @@ if (!controller_manager_->has_parameter("update_rate"))
 
 ---
 
-### 12. Gravity Compensation Validation
+### 11. Gravity Compensation Validation
 
-**Added:** Publisher for `qfrc_bias` (MuJoCo's gravity/Coriolis/centrifugal term)
+**Added:** Publisher for `qfrc_bias` (MuJoCo's computed gravity/Coriolis/centrifugal forces)
 
-```cpp
-// In update() loop, after mj_step2
-std_msgs::msg::Float64MultiArray qfrc_bias_msg;
-qfrc_bias_msg.data.resize(mj_model_->nv);
-for (int i = 0; i < mj_model_->nv; i++)
-{
-  qfrc_bias_msg.data[i] = mj_data_->qfrc_bias[i];
-}
-qfrc_bias_publisher_->publish(qfrc_bias_msg);
-```
+Published after `mj_step2` in update loop as Float64MultiArray message.
 
 **Purpose:**
 
@@ -524,32 +313,22 @@ qfrc_bias_publisher_->publish(qfrc_bias_msg);
 
 **Topic:** `/mujoco/qfrc_bias`
 
+This allows real-time comparison between your controller's gravity compensation and MuJoCo's physics engine calculations.
+
 ---
 
-### 13. Thread-Safe Clock Publishing
+### 12. Thread-Safe Clock Publishing
 
 **Problem:** Multi-threaded architecture (controller manager in separate thread) could cause out-of-order clock messages
 
 **Solution:** Mutex-protected monotonic clock guarantee
 
-```cpp
-void MujocoRos2Control::publish_sim_time(rclcpp::Time sim_time)
-{
-  static rclcpp::Time last_published_time(0, 0, RCL_ROS_TIME);
-  static std::mutex clock_mutex;
+**Implementation:**
 
-  std::lock_guard<std::mutex> lock(clock_mutex);
-  if (sim_time <= last_published_time)
-  {
-    return;  // Skip if time hasn't advanced
-  }
-
-  last_published_time = sim_time;
-  rosgraph_msgs::msg::Clock sim_time_msg;
-  sim_time_msg.clock = sim_time;
-  clock_publisher_->publish(sim_time_msg);
-}
-```
+- Static last_published_time tracking
+- Mutex protects clock publishing
+- Skip publish if time hasn't advanced (prevents backward jumps)
+- Only publish if sim_time > last_published_time
 
 **Benefits:**
 
@@ -558,54 +337,139 @@ void MujocoRos2Control::publish_sim_time(rclcpp::Time sim_time)
 
 ---
 
-## Testing Infrastructure
+### 13. Simulation Control Service (Pause/Unpause/Reset)
 
-### New Test Suite
+**Added:** Runtime control of simulation execution state via ROS2 service
 
-**Location:** `mujoco_ros2_control/test/`
+#### Service Definition
 
-**Tests:**
+Service: `mujoco_ros2_control_msgs/srv/SimulationControl.srv`
 
-1. **URDF/MuJoCo Validation Test**
-   - File: `test_validation.py`
-   - Purpose: Verify mismatch detection (built into `mujoco_system.cpp` lines 452-482)
-   - Tests that system throws error when URDF declares interfaces without corresponding MuJoCo actuators
-   - Expected: Throws error with clear message
+**Request:** `command` (string) - "pause", "unpause", "reset", or "status"
 
-2. **KV Warning Test**
-   - File: `test_kv_warning.py`
-   - Purpose: Verify KV warning system (built into `mujoco_system.cpp` lines 424-450)
-   - Tests that system warns when position actuators have non-zero kv with effort interface exposed
-   - Expected: Emits warning during initialization
+**Response:**
 
-3. **Manual Integration Tests**
-   - Scripts: `manual_test.sh`, `run_test.sh`
-   - Purpose: End-to-end testing with real controllers
+- `success` (bool) - Whether command succeeded
+- `message` (string) - Status message
+- `current_state` (string) - "PAUSED" or "RUNNING"
 
-**Documentation:** See `test/README.md` and `test/TEST_SUMMARY.md`
+#### Commands
+
+1. **`status`** - Query current state without changing it (read-only)
+2. **`pause`** - Freeze physics and time (controllers remain active)
+3. **`unpause`** - Resume normal simulation execution
+4. **`reset`** - Reset to initial keyframe and transition to PAUSED state
+
+#### Initial State
+
+**Simulation always starts PAUSED** - explicit unpause required to begin execution.
+
+This allows:
+
+- Inspection of initial configuration before starting
+- Controller loading/activation without physics running
+- Predictable, reproducible test setups
+
+#### Paused State Behavior
+
+When PAUSED:
+
+- **Physics steps skipped:** `mj_step1()` and `mj_step2()` not executed
+- **Simulation time frozen:** Clock publishes frozen time value
+- **Controllers remain active:** `read/update/write` called with `period=0`
+- **State interfaces frozen:** Joint positions/velocities unchanging
+
+**Key insight:** Running controllers with `dt=0` and frozen state prevents:
+
+- Controller activation timeouts (controllers can be loaded while paused)
+- Integral windup (no time passes, so integrals don't accumulate)
+- State machine issues (controller lifecycle works normally)
+
+#### Implementation
+
+**Update loop logic:**
+
+- Check state with mutex protection
+- If PAUSED:
+  - Call controller_manager read/update/write with zero period
+  - Publish frozen time
+  - Return early (skip physics steps)
+- If RUNNING:
+  - Continue with normal execution (physics + controllers)
+
+#### Usage Examples
+
+**Service name:** `/simulation_control`
+
+**Commands available:**
+
+- Query state: `{command: 'status'}`
+- Start simulation: `{command: 'unpause'}`
+- Pause for inspection: `{command: 'pause'}`
+- Reset to initial state: `{command: 'reset'}`
+
+Use `ros2 service call` with `mujoco_ros2_control_msgs/srv/SimulationControl` or programmatic ROS2 service clients to control simulation state.
+
+#### Use Cases
+
+1. **Testing workflows:** Pause between test phases for data collection
+2. **Controller validation:** Load/activate controllers while paused
+3. **Debugging:** Freeze simulation to inspect state
+4. **Experiment iteration:** Reset to initial conditions for repeated trials
+5. **Safe parameter modification:** Pause, modify, resume
+
+#### Thread Safety
+
+- State transitions protected by `sim_state_mutex_`
+- Safe concurrent access from service callbacks and main simulation loop
+- Atomic state queries via `status` command
+
+#### Reset Integration
+
+The `reset` command integrates with the existing keyframe system:
+
+- Uses `initial_keyframe` parameter configured in launch file
+- Queues keyframe reset via existing `reset_to_keyframe` mechanism
+- Automatically transitions to PAUSED state after reset
+- Allows inspection before resuming with `unpause`
+
+**Benefits:**
+
+- Deterministic initial state for all tests
+- No "race condition" at startup (controllers load while simulation frozen)
+- Reproducible experiments with clean reset capability
+- Debugging-friendly pause/inspect/resume workflow
+- Compatible with all existing controllers and hardware interfaces
 
 ---
 
-## New Demo Packages
+## Demo Package
 
-### Test Demos
+### Getting Started
 
 **Location:** `mujoco_ros2_control_demos/`
 
-**New demos:**
+A comprehensive demo showcasing all major features:
 
-1. **1-DOF Gravity Test** (`test_1dof_gravity.launch.py`)
-   - Vertical pendulum with gravity compensation
-   - Uses initial pose configuration
-   - Validates gravity compensation with `qfrc_bias` topic
+- **1-DOF Gravity Compensation Demo** (`test_1dof_gravity.launch.py`)
+  - Demonstrates actuator-centric control
+  - MIT mode with gravity compensation
+  - Initial pose configuration (keyframes)
+  - Simulation control (pause/unpause/reset)
+  - External wrench application
+  - Gravity validation with `qfrc_bias` topic
 
-2. **1-DOF MIT Mode Test** (`test_1dof_mit.launch.py`)
-   - Full MIT mode with `zordi_mit_controller`
-   - Tests multi-interface control
+**Quick Start:**
 
-3. **1-DOF Multi-Mode Test** (`test_1dof_multimode.launch.py`)
-   - Systematic testing of all interface combinations
-   - See `mujoco_ros2_control_demos/docs/MULTI_INTERFACE_TESTING.md`
+```bash
+cd ~/ros2_ws
+colcon build --packages-select mujoco_ros2_control mujoco_ros2_control_demos zordi_mit_controller
+source install/setup.bash
+ros2 launch mujoco_ros2_control_demos test_1dof_gravity.launch.py
+```
+
+**For detailed usage examples and tutorials:**
+See `mujoco_ros2_control_demos/README.md`
 
 ---
 
@@ -615,19 +479,15 @@ void MujocoRos2Control::publish_sim_time(rclcpp::Time sim_time)
 
 #### MuJoCo Model Changes
 
-**Required naming:**
+**Required naming convention:**
 
-```xml
-<actuator>
-  <position name="act_pos_joint1" joint="joint1" kp="5000" kv="0"/>
-  <velocity name="act_vel_joint1" joint="joint1" kv="500"/>
-  <motor name="act_tau_joint1" joint="joint1" gear="1"/>
-</actuator>
-```
+- Position actuators: `act_pos_{joint_name}`
+- Velocity actuators: `act_vel_{joint_name}`
+- Torque actuators: `act_tau_{joint_name}`
 
 **Notes:**
 
-- Must use exact naming convention: `act_pos_*`, `act_vel_*`, `act_tau_*`
+- Must use exact naming convention
 - For MIT mode, must add all three actuators
 - Set `kv="0"` on position actuators for clean neutralization
 - Old naming (e.g., `actuator_joint1`) is no longer supported
@@ -636,24 +496,13 @@ void MujocoRos2Control::publish_sim_time(rclcpp::Time sim_time)
 
 **Old:** Conditional interfaces based on control mode
 
-**New:** Always expose all interfaces you want to use
+**New:** Always expose all interfaces you want to use in the `<ros2_control>` tag
 
-```xml
-<ros2_control name="MujocoSystem" type="system">
-  <hardware>
-    <plugin>mujoco_ros2_control/MujocoSystem</plugin>
-  </hardware>
-  <joint name="joint1">
-    <!-- Always expose all interfaces -->
-    <command_interface name="position"/>
-    <command_interface name="velocity"/>
-    <command_interface name="effort"/>
-    <state_interface name="position"/>
-    <state_interface name="velocity"/>
-    <state_interface name="effort"/>
-  </joint>
-</ros2_control>
-```
+**Joint interface requirements:**
+
+- Expose command interfaces: position, velocity, and/or effort (as needed)
+- Expose state interfaces: position, velocity, and/or effort (as needed)
+- For MIT mode: Expose all three command interfaces (position, velocity, effort)
 
 #### Controller Configuration
 
@@ -665,10 +514,8 @@ No changes needed - controllers work as before. Mode switching happens automatic
 
 ### Breaking Changes
 
-- **Removed:** Global `control_mode` parameter (was: "position", "velocity", "effort", "all")
-- **Removed:** Legacy actuator naming (`actuator_*`) - must use `act_pos_*`, `act_vel_*`, `act_tau_*`
-- **Deprecated:** Mode switching logic (replaced by actuator-centric design)
-- **Required:** Matching actuators in MuJoCo for each URDF command interface
+- **Required:** Actuator-based control - MuJoCo XML models must now include actuators with specific naming conventions (`act_pos_*`, `act_vel_*`, `act_tau_*`) for each URDF command interface. The previous implementation directly manipulated simulation state (`qpos`/`qvel`/`qfrc_applied`) without requiring actuators.
+- **Changed:** Control application method - Commands are now applied through MuJoCo actuators instead of directly setting simulation state variables.
 
 ### Preserved Compatibility
 
@@ -689,6 +536,9 @@ No changes needed - controllers work as before. Mode switching happens automatic
 
 - **zordi_mit_controller**: Full MIT mode with gravity compensation
 - **mujoco_ros2_control_msgs**: Service definitions for simulation utilities
+  - `ApplyExternalWrench.srv` - Apply forces/torques to bodies
+  - `ResetToKeyframe.srv` - Reset simulation to keyframe
+  - `SimulationControl.srv` - Pause/unpause/reset/status control
 
 ---
 
@@ -700,6 +550,8 @@ No changes needed - controllers work as before. Mode switching happens automatic
 - `doc/MODE_COMPARISON.md` - Comparison of control modes
 - `doc/POSITION_SERVO_MODE_FINAL.md` - Position servo implementation
 - `doc/REAL_TIME_SYNC_FIX.md` - Real-time synchronization analysis
+- `doc/SIMULATION_CONTROL.md` - Simulation control service guide
+- `doc/SIMULATION_CONTROL_INTEGRATION_EXAMPLE.md` - Integration examples and patterns
 - `doc/mujoco_ros2_control_updates.md` - This file
 
 ### Test Documentation
@@ -721,7 +573,8 @@ No changes needed - controllers work as before. Mode switching happens automatic
 
 ## Known Limitations
 
-None at this time.
+- **Simulation control service:** Service is at global namespace `/simulation_control` rather than node-namespaced
+- **Reset command:** Requires `initial_keyframe` parameter to be configured; fails gracefully with error message if not set
 
 ## Future Work
 
@@ -729,6 +582,7 @@ None at this time.
 2. **Dynamic actuator gain tuning:** Runtime adjustment of kp/kv parameters
 3. **Sensor support:** Expand IMU and force-torque sensor capabilities
 4. **URDF loading:** Direct URDF to MuJoCo conversion (eliminate XML step)
+5. **Simulation speed control:** Add service to adjust real-time factor (run faster/slower than real-time)
 
 ---
 
