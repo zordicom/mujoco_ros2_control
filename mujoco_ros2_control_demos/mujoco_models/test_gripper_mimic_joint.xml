@@ -22,6 +22,17 @@
             </body>
         </body>
 	</worldbody>
+    <actuator>
+        <!-- Right finger position actuator -->
+        <position name="act_pos_right_finger_joint" joint="right_finger_joint"
+                  kp="100.0" kv="0.0"
+                  ctrlrange="-0.5 0.5" forcerange="-100 100"/>
+
+        <!-- Left finger position actuator (mimic joint) -->
+        <position name="act_pos_left_finger_joint" joint="left_finger_joint"
+                  kp="100.0" kv="0.0"
+                  ctrlrange="-0.5 0.5" forcerange="-100 100"/>
+    </actuator>
     <contact>
         <exclude body1="finger_right" body2="finger_left" />
     </contact>

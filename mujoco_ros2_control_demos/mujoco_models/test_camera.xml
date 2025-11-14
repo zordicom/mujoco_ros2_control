@@ -24,7 +24,10 @@
     </worldbody>
 
     <actuator>
-        <motor joint="camera_joint" ctrlrange="-1 1" gear="100"/>
+        <!-- Position actuator with correct naming convention -->
+        <position name="act_pos_camera_joint" joint="camera_joint"
+                  kp="100.0" kv="0.0"
+                  ctrlrange="-0.5236 0.5236" forcerange="-10 10"/>
     </actuator>
 
 </mujoco>

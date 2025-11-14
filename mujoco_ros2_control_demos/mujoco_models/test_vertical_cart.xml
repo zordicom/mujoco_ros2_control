@@ -16,6 +16,21 @@
             </body>
         </body>
 	</worldbody>
+    <actuator>
+        <!-- Position actuator: kv=0.0 for MIT mode compatibility -->
+        <position name="act_pos_slider_to_cart" joint="slider_to_cart"
+                  kp="100.0" kv="0.0"
+                  ctrlrange="-2 2" forcerange="-1000 1000"/>
+
+        <!-- Velocity actuator -->
+        <velocity name="act_vel_slider_to_cart" joint="slider_to_cart"
+                  kv="10.0"
+                  ctrlrange="-10 10" forcerange="-1000 1000"/>
+
+        <!-- Torque actuator -->
+        <motor name="act_tau_slider_to_cart" joint="slider_to_cart"
+               ctrlrange="-1000 1000" forcerange="-1000 1000"/>
+    </actuator>
     <contact>
         <exclude body1="slideBar" body2="cart" />
     </contact>

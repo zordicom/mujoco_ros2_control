@@ -33,6 +33,17 @@
             </body>
         </body>
 	</worldbody>
+    <actuator>
+        <!-- Steering position actuator -->
+        <position name="act_pos_steering_joint" joint="steering_joint"
+                  kp="100.0" kv="0.0"
+                  ctrlrange="-1.57 1.57" forcerange="-100 100"/>
+
+        <!-- Traction wheel velocity actuator -->
+        <velocity name="act_vel_traction_joint" joint="traction_joint"
+                  kv="10.0"
+                  ctrlrange="-50 50" forcerange="-100 100"/>
+    </actuator>
     <contact>
         <exclude body1="chassis" body2="left_wheel" />
         <exclude body1="chassis" body2="right_wheel" />

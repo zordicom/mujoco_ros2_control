@@ -27,6 +27,17 @@
             </body>
         </body>
 	</worldbody>
+    <actuator>
+        <!-- Left wheel velocity actuator -->
+        <velocity name="act_vel_left_wheel_joint" joint="left_wheel_joint"
+                  kv="10.0"
+                  ctrlrange="-50 50" forcerange="-100 100"/>
+
+        <!-- Right wheel velocity actuator -->
+        <velocity name="act_vel_right_wheel_joint" joint="right_wheel_joint"
+                  kv="10.0"
+                  ctrlrange="-50 50" forcerange="-100 100"/>
+    </actuator>
     <contact>
         <exclude body1="chassis" body2="left_wheel" />
         <exclude body1="chassis" body2="right_wheel" />
