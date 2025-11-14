@@ -468,13 +468,13 @@ void MujocoRos2Control::handle_reset_to_keyframe(
 
   // Validate keyframe exists before queuing
   int key_id = -1;
-  
+
   // Try to parse as integer index first
   try {
     key_id = std::stoi(keyframe);
     if (key_id < 0 || key_id >= mj_model_->nkey) {
       response->success = false;
-      response->message = "Keyframe index " + keyframe + " out of range [0, " + 
+      response->message = "Keyframe index " + keyframe + " out of range [0, " +
                           std::to_string(mj_model_->nkey - 1) + "]";
       RCLCPP_WARN(logger_, "reset_to_keyframe: %s", response->message.c_str());
       return;
@@ -590,7 +590,7 @@ void MujocoRos2Control::handle_simulation_control(
           response->success = false;
           response->message = "Initial keyframe index out of range";
           response->current_state = (sim_state_ == SimulationState::PAUSED) ? "PAUSED" : "RUNNING";
-          RCLCPP_WARN(logger_, "simulation_control: Initial keyframe '%s' out of range", 
+          RCLCPP_WARN(logger_, "simulation_control: Initial keyframe '%s' out of range",
                       initial_keyframe_name_.c_str());
           return;
         }
