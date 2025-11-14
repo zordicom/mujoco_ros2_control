@@ -35,8 +35,10 @@ MujocoRos2Control::MujocoRos2Control(
       mj_data_(mujoco_data),
       logger_(rclcpp::get_logger(node_->get_name() + std::string(".mujoco_ros2_control"))),
       control_period_(rclcpp::Duration(1, 0)),
-      last_update_sim_time_ros_(0, 0, RCL_ROS_TIME)
+      last_update_sim_time_ros_(0, 0, RCL_ROS_TIME),
+      sim_state_(SimulationState::PAUSED)
 {
+  RCLCPP_INFO(logger_, "Simulation will start in PAUSED state");
 }
 
 MujocoRos2Control::~MujocoRos2Control()
@@ -137,6 +139,11 @@ void MujocoRos2Control::init()
     {
       hardware.hardware_parameters["initial_keyframe"] =
         node_->get_parameter("initial_keyframe").as_string();
+      // Store initial keyframe name for reset command
+      if (initial_keyframe_name_.empty())
+      {
+        initial_keyframe_name_ = node_->get_parameter("initial_keyframe").as_string();
+      }
     }
 
     std::string robot_hw_sim_type_str_ = hardware.hardware_class_type;
@@ -233,10 +240,47 @@ void MujocoRos2Control::init()
         std::placeholders::_1, std::placeholders::_2));
 
   RCLCPP_INFO(logger_, "Reset to keyframe service ready at '~/reset_to_keyframe'");
+
+  // Service to control simulation execution (pause/unpause/reset)
+  sim_control_srv_ =
+    node_->create_service<mujoco_ros2_control_msgs::srv::SimulationControl>(
+      "simulation_control",
+      std::bind(
+        &MujocoRos2Control::handle_simulation_control, this,
+        std::placeholders::_1, std::placeholders::_2));
+
+  RCLCPP_INFO(logger_, "Simulation control service ready at '~/simulation_control'");
 }
 
 void MujocoRos2Control::update()
 {
+  // Check if paused - if so, run controllers but skip physics
+  bool is_paused = false;
+  {
+    std::lock_guard<std::mutex> lock(sim_state_mutex_);
+    is_paused = (sim_state_ == SimulationState::PAUSED);
+  }
+
+  if (is_paused)
+  {
+    // When PAUSED: Allow controller manager to run (for state transitions, service calls)
+    // but don't advance simulation time or execute physics
+    auto frozen_time_sec = static_cast<int>(mj_data_->time);
+    auto frozen_time_nsec = static_cast<int>((mj_data_->time - frozen_time_sec) * 1e9);
+    rclcpp::Time frozen_time(frozen_time_sec, frozen_time_nsec, RCL_ROS_TIME);
+
+    // Run controller manager with zero period so controllers can be managed
+    // but commands won't affect the (frozen) simulation
+    rclcpp::Duration zero_period(0, 0);
+    controller_manager_->read(frozen_time, zero_period);
+    controller_manager_->update(frozen_time, zero_period);
+    controller_manager_->write(frozen_time, zero_period);
+
+    // Publish frozen time
+    publish_sim_time(frozen_time);
+    return;
+  }
+
   // Check for pending keyframe reset
   {
     std::lock_guard<std::mutex> lock(reset_keyframe_mutex_);
@@ -431,6 +475,104 @@ void MujocoRos2Control::handle_reset_to_keyframe(
   response->success = true;
   response->message = "Keyframe reset queued: " + keyframe;
   RCLCPP_INFO(logger_, "reset_to_keyframe SERVICE RECEIVED: keyframe='%s'", keyframe.c_str());
+}
+
+void MujocoRos2Control::handle_simulation_control(
+  const std::shared_ptr<mujoco_ros2_control_msgs::srv::SimulationControl::Request> request,
+  std::shared_ptr<mujoco_ros2_control_msgs::srv::SimulationControl::Response> response)
+{
+  const std::string command = request->command;
+
+  // Validate command
+  if (command != "pause" && command != "unpause" && command != "reset" && command != "status")
+  {
+    response->success = false;
+    response->message = "Invalid command. Must be 'pause', 'unpause', 'reset', or 'status'";
+    response->current_state = "";
+    RCLCPP_WARN(logger_, "simulation_control SERVICE: Invalid command '%s'", command.c_str());
+    return;
+  }
+
+  // Thread-safe state transition
+  {
+    std::lock_guard<std::mutex> lock(sim_state_mutex_);
+
+    // Handle status query (read-only, no state change)
+    if (command == "status")
+    {
+      response->success = true;
+      response->message = (sim_state_ == SimulationState::PAUSED)
+        ? "Simulation is paused"
+        : "Simulation is running";
+      response->current_state = (sim_state_ == SimulationState::PAUSED) ? "PAUSED" : "RUNNING";
+      return;
+    }
+
+    if (command == "pause")
+    {
+      if (sim_state_ == SimulationState::PAUSED)
+      {
+        response->success = true;
+        response->message = "Simulation already paused";
+        response->current_state = "PAUSED";
+        RCLCPP_INFO(logger_, "simulation_control: Already PAUSED");
+      }
+      else
+      {
+        sim_state_ = SimulationState::PAUSED;
+        response->success = true;
+        response->message = "Simulation paused";
+        response->current_state = "PAUSED";
+        RCLCPP_INFO(logger_, "simulation_control: PAUSED");
+      }
+    }
+    else if (command == "unpause")
+    {
+      if (sim_state_ == SimulationState::RUNNING)
+      {
+        response->success = true;
+        response->message = "Simulation already running";
+        response->current_state = "RUNNING";
+        RCLCPP_INFO(logger_, "simulation_control: Already RUNNING");
+      }
+      else
+      {
+        sim_state_ = SimulationState::RUNNING;
+        response->success = true;
+        response->message = "Simulation unpaused";
+        response->current_state = "RUNNING";
+        RCLCPP_INFO(logger_, "simulation_control: RUNNING");
+      }
+    }
+    else if (command == "reset")
+    {
+      // Reset to initial keyframe and transition to PAUSED
+      if (initial_keyframe_name_.empty())
+      {
+        response->success = false;
+        response->message = "No initial keyframe configured";
+        response->current_state = (sim_state_ == SimulationState::PAUSED) ? "PAUSED" : "RUNNING";
+        RCLCPP_WARN(logger_, "simulation_control: Cannot reset, no initial keyframe configured");
+        return;
+      }
+
+      // Queue the keyframe reset
+      {
+        std::lock_guard<std::mutex> reset_lock(reset_keyframe_mutex_);
+        pending_reset_.keyframe = initial_keyframe_name_;
+        pending_reset_.pending = true;
+      }
+
+      // Transition to PAUSED
+      sim_state_ = SimulationState::PAUSED;
+      response->success = true;
+      response->message = "Reset to keyframe '" + initial_keyframe_name_ + "' and PAUSED";
+      response->current_state = "PAUSED";
+      RCLCPP_INFO(
+        logger_, "simulation_control: RESET to keyframe '%s' and PAUSED",
+        initial_keyframe_name_.c_str());
+    }
+  }
 }
 
 }  // namespace mujoco_ros2_control

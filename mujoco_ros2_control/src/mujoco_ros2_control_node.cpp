@@ -86,6 +86,9 @@ int main(int argc, const char **argv)
   mujoco_control.init();
   RCLCPP_INFO_STREAM(
     node->get_logger(), "Mujoco ros2 controller has been successfully initialized !");
+  RCLCPP_INFO(
+    node->get_logger(),
+    "Simulation initialized in PAUSED state. Use ~/simulation_control service to unpause.");
 
   // Initialize rendering and cameras (optional in headless mode)
   mujoco_ros2_control::MujocoRendering *rendering = nullptr;

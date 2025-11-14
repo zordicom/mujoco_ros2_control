@@ -13,6 +13,7 @@ find_package(geometry_msgs REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/ApplyExternalWrench.srv"
   "srv/ResetToKeyframe.srv"
+  "srv/SimulationControl.srv"
   DEPENDENCIES geometry_msgs
 )
 

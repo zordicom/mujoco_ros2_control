@@ -1,0 +1,6 @@
+# Control simulation execution state
+string command  # "pause", "unpause", "reset", or "status"
+---
+bool success
+string message
+string current_state  # "PAUSED" or "RUNNING"
