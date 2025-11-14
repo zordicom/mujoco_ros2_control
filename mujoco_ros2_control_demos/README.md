@@ -150,28 +150,17 @@ bool mit_mode = effort_active && (position_active || velocity_active);
 
 The controller claims only the effort interface and applies gravity compensation torques.
 
-**Configuration (`test_1dof_gravity.yaml`):**
-
-```yaml
-zordi_grav_comp_controller:
-  ros__parameters:
-    joints: [j1]
-    gravity_comp_only: true       # Pure gravity mode
-    command_interfaces: [effort]  # Only effort
-    use_gravity_compensation: true
-```
-
 **Try it:**
 
 ```bash
-# Terminal 1: Launch
+# Terminal 1: Launch (loads both controllers in inactive state)
 ros2 launch mujoco_ros2_control_demos test_1dof_gravity.launch.py
 
 # Terminal 2: Unpause simulation
 ros2 service call /simulation_control mujoco_ros2_control_msgs/srv/SimulationControl \
   "{command: 'unpause'}"
 
-# Activate controller
+# Activate gravity compensation controller
 ros2 control set_controller_state zordi_grav_comp_controller active
 
 # Monitor joint state
@@ -188,22 +177,15 @@ ros2 topic echo /joint_states
 
 The controller claims position, velocity, and effort interfaces, triggering MIT mode.
 
-**Configuration:**
-
-```yaml
-zordi_mit_controller:
-  ros__parameters:
-    joints: [j1]
-    command_interfaces: [position, velocity, effort]  # All three = MIT mode
-    state_interfaces: [position, velocity]
-    use_gravity_compensation: true
-```
-
 **Try it:**
 
 ```bash
-# Terminal 1: Launch (but configure for MIT mode)
-# You'll need to create a new config file or modify the existing one
+# Terminal 1: Same launch file - both controllers are already loaded!
+# (If not running, start with: ros2 launch mujoco_ros2_control_demos test_1dof_gravity.launch.py)
+
+# Terminal 2: Switch from gravity comp controller to MIT controller
+# First, deactivate the gravity comp controller
+ros2 control set_controller_state zordi_grav_comp_controller inactive
 
 # Activate MIT controller
 ros2 control set_controller_state zordi_mit_controller active
@@ -219,6 +201,20 @@ ros2 action send_goal /zordi_mit_controller/follow_joint_trajectory \
 - Smooth trajectory tracking with gravity compensation
 - Automatic hold after trajectory completion
 - Zero drift when holding position
+
+**Additional trajectories to try:**
+
+```bash
+# Move to different positions
+ros2 action send_goal /zordi_mit_controller/follow_joint_trajectory \
+  control_msgs/action/FollowJointTrajectory \
+  "{trajectory: {joint_names: ['j1'], points: [{positions: [-0.5], time_from_start: {sec: 1}}]}}"
+
+# Multi-point trajectory
+ros2 action send_goal /zordi_mit_controller/follow_joint_trajectory \
+  control_msgs/action/FollowJointTrajectory \
+  "{trajectory: {joint_names: ['j1'], points: [{positions: [0.5], time_from_start: {sec: 1}}, {positions: [-0.5], time_from_start: {sec: 2}}, {positions: [0.0], time_from_start: {sec: 3}}]}}"
+```
 
 ### Example 3: Position-Only Mode
 

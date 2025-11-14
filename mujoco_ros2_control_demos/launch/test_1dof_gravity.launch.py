@@ -1,17 +1,24 @@
 """
-Launch file for 1-DOF gravity compensation test with zordi_mit_controller.
+Launch file for 1-DOF gravity compensation and MIT mode demonstrations.
 
-This test uses a VERTICAL pendulum (unlike test_1dof_multimode which is horizontal).
-The pendulum will fall without gravity compensation.
+This test uses a VERTICAL pendulum with two controllers:
+  1. zordi_grav_comp_controller: Pure gravity compensation (no PD control - fully backdrivable)
+  2. zordi_mit_controller: MIT mode with trajectory tracking and gravity compensation
 
-Test objective:
-  - Verify zordi_mit_controller loads with gravity compensation enabled
-  - Verify Pinocchio integration works
-  - Verify pendulum holds upright position (q=0) without falling
+Test objectives:
+  Example 1 (zordi_grav_comp_controller):
+    - Verify pure gravity compensation without trajectory tracking
+    - Pendulum holds upright and is fully backdrivable
+
+  Example 2 (zordi_mit_controller):
+    - Verify MIT mode with trajectory tracking
+    - Send trajectories while maintaining gravity compensation
+    - Smooth tracking with automatic hold after trajectory completion
 
 Expected behavior:
   - Without gravity comp: pendulum falls to q=-π/2 (hanging down)
-  - With gravity comp: pendulum holds at q=0 (upright)
+  - With gravity comp only: pendulum holds at q=0 (upright) and is backdrivable
+  - With MIT controller: pendulum tracks commanded trajectories with gravity comp
 """
 
 import os
@@ -45,8 +52,8 @@ def generate_launch_description():
             {
                 "robot_description": robot_description,
                 "mujoco_model_path": str(mujoco_model),
-                "headless": False,  # No viewer window
-                "initial_keyframe": "pos_large",  # Name of keyframe in XML
+                "headless": False,  # Show viewer
+                "initial_keyframe": "test_pose",  # Start upright at q=0
                 "use_sim_time": True,  # Use MuJoCo simulation clock
             },
         ],
@@ -74,13 +81,25 @@ def generate_launch_description():
         output="screen",
     )
 
+    load_zordi_grav_comp_controller = ExecuteProcess(
+        cmd=[
+            "ros2",
+            "control",
+            "load_controller",
+            "--set-state",
+            "inactive",
+            "zordi_grav_comp_controller",
+        ],
+        output="screen",
+    )
+
     load_zordi_mit_controller = ExecuteProcess(
         cmd=[
             "ros2",
             "control",
             "load_controller",
             "--set-state",
-            "active",
+            "inactive",
             "zordi_mit_controller",
         ],
         output="screen",
@@ -90,10 +109,19 @@ def generate_launch_description():
         mujoco_node,
         robot_state_pub_node,
         # Load controllers when mujoco node starts (standard mujoco_ros2_control pattern)
+        # Both controllers are loaded in inactive state - activate manually as needed:
+        #   - zordi_grav_comp_controller: For pure gravity compensation (Example 1)
+        #   - zordi_mit_controller: For trajectory tracking with gravity comp (Example 2)
+        # NOTE: There's an inherent timing issue - simulation starts before controllers activate
+        # This causes initial transients. Starting from stable pose (test_pose at q=0) minimizes this.
         RegisterEventHandler(
             event_handler=OnProcessStart(
                 target_action=mujoco_node,
-                on_start=[load_joint_state_broadcaster, load_zordi_mit_controller],
+                on_start=[
+                    load_joint_state_broadcaster,
+                    load_zordi_grav_comp_controller,
+                    load_zordi_mit_controller,
+                ],
             )
         ),
     ])
