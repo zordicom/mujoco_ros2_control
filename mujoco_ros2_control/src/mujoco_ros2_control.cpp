@@ -254,34 +254,8 @@ void MujocoRos2Control::init()
 
 void MujocoRos2Control::update()
 {
-  // Check if paused - if so, run controllers but skip physics
-  bool is_paused = false;
-  {
-    std::lock_guard<std::mutex> lock(sim_state_mutex_);
-    is_paused = (sim_state_ == SimulationState::PAUSED);
-  }
-
-  if (is_paused)
-  {
-    // When PAUSED: Allow controller manager to run (for state transitions, service calls)
-    // but don't advance simulation time or execute physics
-    auto frozen_time_sec = static_cast<int>(mj_data_->time);
-    auto frozen_time_nsec = static_cast<int>((mj_data_->time - frozen_time_sec) * 1e9);
-    rclcpp::Time frozen_time(frozen_time_sec, frozen_time_nsec, RCL_ROS_TIME);
-
-    // Run controller manager with zero period so controllers can be managed
-    // but commands won't affect the (frozen) simulation
-    rclcpp::Duration zero_period(0, 0);
-    controller_manager_->read(frozen_time, zero_period);
-    controller_manager_->update(frozen_time, zero_period);
-    controller_manager_->write(frozen_time, zero_period);
-
-    // Publish frozen time
-    publish_sim_time(frozen_time);
-    return;
-  }
-
-  // Check for pending keyframe reset
+  // Check for pending keyframe reset FIRST (must happen even when paused)
+  // This allows reset command to work immediately
   {
     std::lock_guard<std::mutex> lock(reset_keyframe_mutex_);
     if (pending_reset_.pending)
@@ -306,6 +280,33 @@ void MujocoRos2Control::update()
 
       pending_reset_.pending = false;
     }
+  }
+
+  // Check if paused AFTER processing any resets
+  bool is_paused = false;
+  {
+    std::lock_guard<std::mutex> lock(sim_state_mutex_);
+    is_paused = (sim_state_ == SimulationState::PAUSED);
+  }
+
+  if (is_paused)
+  {
+    // When PAUSED: Allow controller manager to run (for state transitions, service calls)
+    // but don't advance simulation time or execute physics
+    auto frozen_time_sec = static_cast<int>(mj_data_->time);
+    auto frozen_time_nsec = static_cast<int>((mj_data_->time - frozen_time_sec) * 1e9);
+    rclcpp::Time frozen_time(frozen_time_sec, frozen_time_nsec, RCL_ROS_TIME);
+    
+    // Run controller manager with zero period so controllers can be managed
+    // but commands won't affect the (frozen) simulation
+    rclcpp::Duration zero_period(0, 0);
+    controller_manager_->read(frozen_time, zero_period);
+    controller_manager_->update(frozen_time, zero_period);
+    controller_manager_->write(frozen_time, zero_period);
+    
+    // Publish frozen time
+    publish_sim_time(frozen_time);
+    return;
   }
 
   // Compute current sim time BEFORE stepping (controls apply to upcoming step)
