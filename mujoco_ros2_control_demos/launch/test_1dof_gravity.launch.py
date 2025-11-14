@@ -20,7 +20,7 @@ from pathlib import Path
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import ExecuteProcess, RegisterEventHandler
-from launch.event_handlers import OnProcessExit, OnProcessStart
+from launch.event_handlers import OnProcessStart
 from launch_ros.actions import Node
 
 
@@ -41,48 +41,59 @@ def generate_launch_description():
         package="mujoco_ros2_control",
         executable="mujoco_ros2_control",
         parameters=[
-            controller_config,
+            str(controller_config),
             {
                 "robot_description": robot_description,
                 "mujoco_model_path": str(mujoco_model),
-                "headless": True,  # No viewer window
-                "initial_keyframe": "test_pose",  # Name of keyframe in XML
+                "headless": False,  # No viewer window
+                "initial_keyframe": "pos_large",  # Name of keyframe in XML
                 "use_sim_time": True,  # Use MuJoCo simulation clock
             },
         ],
         output="screen",
     )
 
-    # Spawn joint state broadcaster
-    spawn_joint_broadcaster = Node(
-        package="controller_manager",
-        executable="spawner",
-        arguments=["joint_state_broadcaster"],
+    # Robot state publisher (needed for controller to fetch robot_description)
+    robot_state_pub_node = Node(
+        package="robot_state_publisher",
+        executable="robot_state_publisher",
+        parameters=[{"robot_description": robot_description}],
         output="screen",
     )
 
-    # Spawn zordi_mit_controller
-    spawn_zordi_mit = Node(
-        package="controller_manager",
-        executable="spawner",
-        arguments=["zordi_mit_controller"],
+    # Load controllers using ros2 control CLI (standard mujoco_ros2_control pattern)
+    load_joint_state_broadcaster = ExecuteProcess(
+        cmd=[
+            "ros2",
+            "control",
+            "load_controller",
+            "--set-state",
+            "active",
+            "joint_state_broadcaster",
+        ],
+        output="screen",
+    )
+
+    load_zordi_mit_controller = ExecuteProcess(
+        cmd=[
+            "ros2",
+            "control",
+            "load_controller",
+            "--set-state",
+            "active",
+            "zordi_mit_controller",
+        ],
         output="screen",
     )
 
     return LaunchDescription([
         mujoco_node,
-        # Start broadcaster when mujoco starts
+        robot_state_pub_node,
+        # Load controllers when mujoco node starts (standard mujoco_ros2_control pattern)
         RegisterEventHandler(
             event_handler=OnProcessStart(
                 target_action=mujoco_node,
-                on_start=[spawn_joint_broadcaster],
-            )
-        ),
-        # Start zordi_mit_controller after broadcaster
-        RegisterEventHandler(
-            event_handler=OnProcessExit(
-                target_action=spawn_joint_broadcaster,
-                on_exit=[spawn_zordi_mit],
+                on_start=[load_joint_state_broadcaster, load_zordi_mit_controller],
             )
         ),
     ])
