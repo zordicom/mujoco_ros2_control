@@ -114,11 +114,11 @@ Reset to specific configurations during runtime:
 ```bash
 # Reset to a named keyframe
 ros2 service call /mujoco_ros2_control/reset_to_keyframe \
-  mujoco_ros2_control_msgs/srv/ResetToKeyframe "{keyframe_name: 'home'}"
+  mujoco_ros2_control_msgs/srv/ResetToKeyframe "{keyframe: 'home'}"
 
-# Reset by keyframe index
+# Reset by keyframe index (as string)
 ros2 service call /mujoco_ros2_control/reset_to_keyframe \
-  mujoco_ros2_control_msgs/srv/ResetToKeyframe "{keyframe_index: 0}"
+  mujoco_ros2_control_msgs/srv/ResetToKeyframe "{keyframe: '0'}"
 ```
 
 **Define keyframes in your MuJoCo XML:**
