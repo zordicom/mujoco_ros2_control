@@ -49,9 +49,6 @@ def generate_launch_description():
         pkg_share / "config" / "test_1dof_multimode_with_gravity.yaml"
     )
 
-    # Initial pose config
-    initial_pose_config = str(pkg_share / "config" / "initial_pose_test.yaml")
-
     # MuJoCo ROS2 Control node
     mujoco_node = Node(
         package="mujoco_ros2_control",
@@ -60,9 +57,7 @@ def generate_launch_description():
             {"robot_description": robot_description},
             {"mujoco_model_path": mujoco_model},
             {"headless": False},  # Show MuJoCo viewer for visualization
-            {"unpause": True},
-            {"initial_pose": "home"},  # Start at upright position
-            {"initial_pose_config": initial_pose_config},
+            {"initial_keyframe": "home"},  # Start at upright position
             controller_config,
         ],
         output="screen",

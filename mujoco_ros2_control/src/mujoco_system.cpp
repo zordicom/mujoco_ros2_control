@@ -20,10 +20,10 @@
 
 #include "mujoco_ros2_control/mujoco_system.hpp"
 
-#include <yaml-cpp/yaml.h>
 #include <iostream>
 #include <iomanip>
 #include <fstream>
+#include <cstring>
 
 namespace mujoco_ros2_control
 {
@@ -48,8 +48,11 @@ hardware_interface::return_type MujocoSystem::read(
     joint_state.position = mj_data_->qpos[joint_state.mj_pos_adr];
     joint_state.velocity = mj_data_->qvel[joint_state.mj_vel_adr];
 
-    // Effort: Read from qfrc_applied (both modes write here now)
-    joint_state.effort = mj_data_->qfrc_applied[joint_state.mj_vel_adr];
+    // Effort: Read from qfrc_actuator (actual generalized force from actuators)
+    // This represents what a real torque sensor would measure, or what current-based
+    // torque estimation (τ = Kt × I) would report. It's the actual force applied by
+    // the actuators, not the commanded force.
+    joint_state.effort = mj_data_->qfrc_actuator[joint_state.mj_vel_adr];
   }
 
   // IMU Sensor data
@@ -338,12 +341,10 @@ bool MujocoSystem::init_sim(
   register_joints(urdf_model, hardware_info);
   register_sensors(urdf_model, hardware_info);
 
-  set_initial_pose();  // Applies URDF defaults to qpos
+  // Load keyframe if specified, otherwise use URDF defaults
+  bool keyframe_loaded = load_keyframe(hardware_info);
 
-  // Override qpos if initial pose specified
-  bool pose_override_applied = apply_initial_pose_override(hardware_info);
-
-  // CRITICAL: Sync position_command with actual qpos (after override)
+  // CRITICAL: Sync position_command with actual qpos (after keyframe load)
   // This ensures controllers command the pose we actually set, not URDF defaults
   for (auto &joint_state : joint_states_)
   {
@@ -353,7 +354,7 @@ bool MujocoSystem::init_sim(
   RCLCPP_INFO(logger_, "Initialized position commands from actual joint positions");
 
   // Actuator-centric control: no global mode state to set
-  (void)pose_override_applied;
+  (void)keyframe_loaded;
   RCLCPP_INFO(logger_, "Actuator-centric control initialized");
   RCLCPP_INFO(logger_, "MuJoCo model: nq=%d nv=%d nu=%d", mj_model_->nq, mj_model_->nv, mj_model_->nu);
 
@@ -784,113 +785,151 @@ void MujocoSystem::register_sensors(
   }
 }
 
-void MujocoSystem::set_initial_pose()
+int MujocoSystem::find_keyframe_by_name(const std::string &name)
 {
-  for (auto &joint_state : joint_states_)
+  for (int i = 0; i < mj_model_->nkey; i++)
   {
-    mj_data_->qpos[joint_state.mj_pos_adr] = joint_state.position;
+    int name_adr = mj_model_->name_keyadr[i];
+    const char *key_name = &mj_model_->names[name_adr];
+    if (std::strcmp(key_name, name.c_str()) == 0)
+    {
+      return i;
+    }
   }
+  return -1;  // Not found
 }
 
-bool MujocoSystem::apply_initial_pose_override(
-  const hardware_interface::HardwareInfo &hardware_info)
+bool MujocoSystem::load_keyframe(const hardware_interface::HardwareInfo &hardware_info)
 {
-  // Check if initial pose override is specified
-  auto pose_name_it = hardware_info.hardware_parameters.find("initial_pose");
-  auto config_path_it = hardware_info.hardware_parameters.find("initial_pose_config");
+  // Check if initial_keyframe parameter is specified
+  auto keyframe_param_it = hardware_info.hardware_parameters.find("initial_keyframe");
 
-  if (pose_name_it == hardware_info.hardware_parameters.end() ||
-      config_path_it == hardware_info.hardware_parameters.end())
+  int keyframe_idx = -1;
+
+  if (keyframe_param_it != hardware_info.hardware_parameters.end())
   {
-    RCLCPP_INFO(logger_, "No initial pose override - using URDF defaults");
+    std::string keyframe_spec = keyframe_param_it->second;
+
+    // Try to parse as integer index
+    try
+    {
+      keyframe_idx = std::stoi(keyframe_spec);
+      if (keyframe_idx < 0 || keyframe_idx >= mj_model_->nkey)
+      {
+        RCLCPP_ERROR(
+          logger_,
+          "Keyframe index %d out of range [0, %d)",
+          keyframe_idx,
+          mj_model_->nkey);
+        keyframe_idx = -1;
+      }
+    }
+    catch (const std::exception &)
+    {
+      // Not an integer, try to find by name
+      keyframe_idx = find_keyframe_by_name(keyframe_spec);
+      if (keyframe_idx < 0)
+      {
+        RCLCPP_ERROR(logger_, "Keyframe '%s' not found in model", keyframe_spec.c_str());
+      }
+    }
+  }
+  else if (mj_model_->nkey > 0)
+  {
+    // No parameter specified, but keyframes exist - use first one as fallback
+    keyframe_idx = 0;
+    RCLCPP_INFO(logger_, "No initial_keyframe parameter specified, using first keyframe (index 0)");
+  }
+
+  if (keyframe_idx < 0)
+  {
+    if (mj_model_->nkey == 0)
+    {
+      RCLCPP_INFO(logger_, "No keyframes defined in model - using URDF defaults");
+    }
     return false;
   }
 
-  std::string pose_name = pose_name_it->second;
-  std::string config_path = config_path_it->second;
+  // Load the keyframe
+  mj_resetDataKeyframe(mj_model_, mj_data_, keyframe_idx);
 
-  // Load YAML config with exception handling
-  YAML::Node config;
-  try
-  {
-    config = YAML::LoadFile(config_path);
-  }
-  catch (const YAML::Exception& e)
-  {
-    RCLCPP_ERROR(logger_, "Failed to load pose config '%s': %s",
-                 config_path.c_str(), e.what());
-    return false;
-  }
-
-  if (!config["poses"] || !config["poses"][pose_name])
-  {
-    RCLCPP_ERROR(logger_, "Pose '%s' not found in %s",
-                 pose_name.c_str(), config_path.c_str());
-    return false;
-  }
-
-  auto pose = config["poses"][pose_name];
-
-  RCLCPP_INFO(logger_, "Applying initial pose override: '%s'", pose_name.c_str());
-
-  // Set MuJoCo state (qpos, qvel) and keep joint_states in sync
-  int applied_count = 0;
-  for (auto &joint_state : joint_states_)
-  {
-    // Extract joint key from name (e.g., "openarm_joint2" -> "joint2")
-    // If "joint" not found, use the full joint name (e.g., "j1")
-    size_t pos = joint_state.name.find("joint");
-    std::string joint_key;
-    if (pos == std::string::npos)
-    {
-      // Use full joint name for simple names like "j1", "j2", etc.
-      joint_key = joint_state.name;
-    }
-    else
-    {
-      // Extract from "joint" onwards for names like "openarm_joint2"
-      joint_key = joint_state.name.substr(pos);
-    }
-
-    if (pose[joint_key])
-    {
-      double new_position = pose[joint_key].as<double>();
-
-      // Set position and velocity (part of MuJoCo state vector)
-      mj_data_->qpos[joint_state.mj_pos_adr] = new_position;
-      mj_data_->qvel[joint_state.mj_vel_adr] = 0.0;
-
-      // Keep joint_state in sync
-      joint_state.position = new_position;
-      joint_state.velocity = 0.0;
-      joint_state.position_command = new_position;
-      joint_state.velocity_command = 0.0;
-
-      RCLCPP_INFO(logger_, "  %s: %.3f rad (pos_cmd=%.3f)",
-                  joint_state.name.c_str(), new_position, joint_state.position_command);
-      applied_count++;
-    }
-  }
-
-  // Forward dynamics: propagate state through kinematics and compute derived quantities
-  // (body positions, Jacobians, sensor data, qacc, etc.)
+  // Forward dynamics: propagate state through kinematics
   mj_forward(mj_model_, mj_data_);
 
-  std::string description = "";
-  if (pose["description"].IsDefined())
+  // Sync joint_states with loaded qpos/qvel
+  for (auto &joint_state : joint_states_)
   {
-    description = pose["description"].as<std::string>();
+    joint_state.position = mj_data_->qpos[joint_state.mj_pos_adr];
+    joint_state.velocity = mj_data_->qvel[joint_state.mj_vel_adr];
+    joint_state.position_command = joint_state.position;
+    joint_state.velocity_command = 0.0;
   }
 
-  RCLCPP_INFO(logger_, "Applied initial pose '%s': %s (%d joints)",
-              pose_name.c_str(), description.c_str(), applied_count);
+  // Get keyframe name for logging
+  int name_adr = mj_model_->name_keyadr[keyframe_idx];
+  const char *key_name = &mj_model_->names[name_adr];
 
-  // DIAGNOSTIC: Verify qpos was actually set correctly
-  RCLCPP_INFO(logger_, "VERIFY qpos after mj_forward: J2=%.4f, J4=%.4f",
-              mj_data_->qpos[joint_states_[1].mj_pos_adr],
-              mj_data_->qpos[joint_states_[3].mj_pos_adr]);
+  RCLCPP_INFO(
+    logger_,
+    "Loaded keyframe %d ('%s') with %d joint positions",
+    keyframe_idx,
+    key_name,
+    static_cast<int>(joint_states_.size()));
 
-  return true;  // Successfully applied pose override
+  return true;
+}
+
+bool MujocoSystem::reset_to_keyframe(const std::string &keyframe_name_or_idx)
+{
+  int keyframe_idx = -1;
+
+  // Try to parse as integer index
+  try
+  {
+    keyframe_idx = std::stoi(keyframe_name_or_idx);
+    if (keyframe_idx < 0 || keyframe_idx >= mj_model_->nkey)
+    {
+      RCLCPP_ERROR(
+        logger_,
+        "Keyframe index %d out of range [0, %d)",
+        keyframe_idx,
+        mj_model_->nkey);
+      return false;
+    }
+  }
+  catch (const std::exception &)
+  {
+    // Not an integer, try to find by name
+    keyframe_idx = find_keyframe_by_name(keyframe_name_or_idx);
+    if (keyframe_idx < 0)
+    {
+      RCLCPP_ERROR(logger_, "Keyframe '%s' not found in model", keyframe_name_or_idx.c_str());
+      return false;
+    }
+  }
+
+  // Load the keyframe
+  mj_resetDataKeyframe(mj_model_, mj_data_, keyframe_idx);
+
+  // Forward dynamics: propagate state through kinematics
+  mj_forward(mj_model_, mj_data_);
+
+  // Sync joint_states with loaded qpos/qvel
+  for (auto &joint_state : joint_states_)
+  {
+    joint_state.position = mj_data_->qpos[joint_state.mj_pos_adr];
+    joint_state.velocity = mj_data_->qvel[joint_state.mj_vel_adr];
+    joint_state.position_command = joint_state.position;
+    joint_state.velocity_command = 0.0;
+  }
+
+  // Get keyframe name for logging
+  int name_adr = mj_model_->name_keyadr[keyframe_idx];
+  const char *key_name = &mj_model_->names[name_adr];
+
+  RCLCPP_INFO(logger_, "Reset to keyframe %d ('%s')", keyframe_idx, key_name);
+
+  return true;
 }
 
 void MujocoSystem::get_joint_limits(

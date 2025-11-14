@@ -278,42 +278,41 @@ if (joint_state.mj_pos_actuator_id >= 0 && has_effort_interface)
 
 ---
 
-### 7. Initial Pose Configuration
+### 7. Initial Pose Configuration (XML Keyframes)
 
-**Added:** Support for defining initial joint configurations in YAML
+**Added:** Support for loading initial joint configurations using native MuJoCo XML keyframes
 
-**Purpose:** Start simulations from specific configurations (e.g., testing gravity compensation, collision avoidance, specific scenarios)
+**Purpose:** Start simulations from specific configurations (e.g., testing gravity compensation, collision avoidance, specific scenarios) using MuJoCo's built-in keyframe mechanism.
 
-#### YAML Configuration Format
+#### XML Keyframe Format
 
-Create a YAML file defining one or more named poses:
+Define keyframes in your MuJoCo XML model file:
 
-```yaml
-poses:
-  test_pose:
-    j1: 0.5
-    description: "Pendulum at 0.5 rad for gravity comp testing"
+```xml
+<mujoco model="robot">
+  <keyframe>
+    <key name="home" qpos="0.0 0.0 0.0"/>
+    <key name="test_pose" qpos="0.5 -1.57 1.57"/>
+    <key name="crouch" qpos="-0.5 -0.8 -1.2"/>
+  </keyframe>
 
-  home_pose:
-    joint1: 0.0
-    joint2: -1.57
-    joint3: 1.57
-    description: "Robot home position"
+  <!-- rest of model definition -->
+</mujoco>
 ```
 
-**Joint naming:** Use the short joint name (e.g., `j1`, `joint2`). For joints named like `openarm_joint2`, you can use either `joint2` or the full name.
+**Attributes:**
+
+- `name` - Identifier for the keyframe (required)
+- `qpos` - Space-separated joint positions in radians/meters (required)
+- `qvel` - Space-separated joint velocities (optional, defaults to 0)
 
 **Units:** Joint positions are in radians for revolute joints, meters for prismatic joints.
 
-**Description:** Optional field for documentation purposes.
-
 #### Launch File Configuration
 
-Pass the pose name and config file path as node parameters:
+Pass the keyframe name or index as a node parameter:
 
 ```python
-initial_pose_config = pkg_share / "config" / "initial_poses.yaml"
-
 mujoco_node = Node(
     package="mujoco_ros2_control",
     executable="mujoco_ros2_control",
@@ -321,8 +320,7 @@ mujoco_node = Node(
         {
             "robot_description": robot_description,
             "mujoco_model_path": str(mujoco_model),
-            "initial_pose": "test_pose",  # Name of pose in YAML
-            "initial_pose_config": str(initial_pose_config),  # Path to YAML file
+            "initial_keyframe": "test_pose",  # Name or index (e.g., "0")
         },
         controller_config,
     ],
@@ -332,18 +330,29 @@ mujoco_node = Node(
 
 #### Behavior
 
-- Both `initial_pose` and `initial_pose_config` parameters must be provided to override URDF defaults
-- Joint velocities are set to zero
-- Joints not listed in the pose configuration retain their URDF default values
-- MuJoCo forward dynamics (`mj_forward`) is called to update derived quantities (body positions, sensor data, etc.)
-- Position commands are initialized from actual qpos (after override)
-- If either parameter is missing, the system uses URDF default positions
+- If `initial_keyframe` parameter is provided, system loads that keyframe by name or index
+- If parameter is not provided but keyframes exist in XML, loads first keyframe (index 0)
+- If no keyframes defined or parameter missing, uses URDF default positions
+- MuJoCo `mj_resetDataKeyframe()` is called to load keyframe state
+- `mj_forward()` is called to propagate kinematics and update derived quantities
+- Position commands are initialized from loaded qpos values
+
+#### Runtime Reset Service
+
+Reset to any keyframe during runtime:
+
+```bash
+ros2 service call /mujoco_ros2_control/reset_to_keyframe \
+  mujoco_ros2_control_msgs/srv/ResetToKeyframe "{keyframe: 'home'}"
+```
+
+Service accepts keyframe name (string) or numeric index.
 
 #### Example
 
-See `mujoco_ros2_control_demos` for a complete example:
+See `mujoco_ros2_control_demos` for complete examples:
 
-- Config: `mujoco_ros2_control_demos/config/initial_pose_test.yaml`
+- Model: `mujoco_ros2_control_demos/mujoco_models/test_1dof_gravity.xml`
 - Launch: `mujoco_ros2_control_demos/launch/test_1dof_gravity.launch.py`
 
 ---

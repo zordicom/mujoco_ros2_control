@@ -35,7 +35,6 @@ def generate_launch_description():
             {"robot_description": robot_description},
             {"mujoco_model_path": mujoco_model},
             {"headless": True},
-            {"unpause": True},
             controller_config,
         ],
         output="screen",

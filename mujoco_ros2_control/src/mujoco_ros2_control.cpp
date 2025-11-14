@@ -132,16 +132,11 @@ void MujocoRos2Control::init()
 
   for (auto &hardware : control_hardware_info)
   {
-    // Add initial pose parameters from node to hardware info
-    if (node_->has_parameter("initial_pose"))
+    // Add initial keyframe parameter from node to hardware info
+    if (node_->has_parameter("initial_keyframe"))
     {
-      hardware.hardware_parameters["initial_pose"] =
-        node_->get_parameter("initial_pose").as_string();
-    }
-    if (node_->has_parameter("initial_pose_config"))
-    {
-      hardware.hardware_parameters["initial_pose_config"] =
-        node_->get_parameter("initial_pose_config").as_string();
+      hardware.hardware_parameters["initial_keyframe"] =
+        node_->get_parameter("initial_keyframe").as_string();
     }
 
     std::string robot_hw_sim_type_str_ = hardware.hardware_class_type;
@@ -165,7 +160,10 @@ void MujocoRos2Control::init()
       return;
     }
 
+    // Store raw pointer for service access before moving to resource_manager
+    MujocoSystemInterface* system_ptr = mujoco_system.get();
     resource_manager->import_component(std::move(mujoco_system), hardware);
+    mujoco_systems_.push_back(system_ptr);
 
     rclcpp_lifecycle::State state(
       lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE,
@@ -225,10 +223,47 @@ void MujocoRos2Control::init()
   RCLCPP_INFO(
     logger_,
     "External wrench service ready at '~/apply_external_wrench' (uses xfrc_applied)");
+
+  // Service to reset to keyframe
+  reset_to_keyframe_srv_ =
+    node_->create_service<mujoco_ros2_control_msgs::srv::ResetToKeyframe>(
+      "reset_to_keyframe",
+      std::bind(
+        &MujocoRos2Control::handle_reset_to_keyframe, this,
+        std::placeholders::_1, std::placeholders::_2));
+
+  RCLCPP_INFO(logger_, "Reset to keyframe service ready at '~/reset_to_keyframe'");
 }
 
 void MujocoRos2Control::update()
 {
+  // Check for pending keyframe reset
+  {
+    std::lock_guard<std::mutex> lock(reset_keyframe_mutex_);
+    if (pending_reset_.pending)
+    {
+      RCLCPP_INFO(logger_, "Processing keyframe reset to '%s'", pending_reset_.keyframe.c_str());
+
+      // Reset all systems to the specified keyframe
+      bool success = true;
+      for (auto* system : mujoco_systems_)
+      {
+        if (!system->reset_to_keyframe(pending_reset_.keyframe))
+        {
+          RCLCPP_ERROR(logger_, "Failed to reset system to keyframe '%s'", pending_reset_.keyframe.c_str());
+          success = false;
+        }
+      }
+
+      if (success)
+      {
+        RCLCPP_INFO(logger_, "Successfully reset to keyframe '%s'", pending_reset_.keyframe.c_str());
+      }
+
+      pending_reset_.pending = false;
+    }
+  }
+
   // Compute current sim time BEFORE stepping (controls apply to upcoming step)
   auto pre_time = mj_data_->time;
   int pre_time_sec = static_cast<int>(pre_time);
@@ -378,6 +413,24 @@ void MujocoRos2Control::handle_apply_external_wrench(
   RCLCPP_INFO(
     logger_, "apply_external_wrench SERVICE RECEIVED: body='%s' (id=%d) F[%.2f,%.2f,%.2f] T[%.2f,%.2f,%.2f], dur=%.3fs",
     body_name.c_str(), body_id, fx, fy, fz, tx, ty, tz, duration);
+}
+
+void MujocoRos2Control::handle_reset_to_keyframe(
+  const std::shared_ptr<mujoco_ros2_control_msgs::srv::ResetToKeyframe::Request> request,
+  std::shared_ptr<mujoco_ros2_control_msgs::srv::ResetToKeyframe::Response> response)
+{
+  std::string keyframe = request->keyframe;
+
+  // Set flag for update loop to execute reset (thread-safe)
+  {
+    std::lock_guard<std::mutex> lock(reset_keyframe_mutex_);
+    pending_reset_.keyframe = keyframe;
+    pending_reset_.pending = true;
+  }
+
+  response->success = true;
+  response->message = "Keyframe reset queued: " + keyframe;
+  RCLCPP_INFO(logger_, "reset_to_keyframe SERVICE RECEIVED: keyframe='%s'", keyframe.c_str());
 }
 
 }  // namespace mujoco_ros2_control

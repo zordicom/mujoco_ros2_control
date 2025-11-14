@@ -63,6 +63,9 @@ public:
     const std::vector<std::string> &start_interfaces,
     const std::vector<std::string> &stop_interfaces) override;
 
+  // Keyframe management
+  bool reset_to_keyframe(const std::string &keyframe_name_or_idx) override;
+
   struct JointState
   {
     std::string name;
@@ -133,8 +136,8 @@ private:
     const urdf::Model &urdf_model, const hardware_interface::HardwareInfo &hardware_info);
   void register_sensors(
     const urdf::Model &urdf_model, const hardware_interface::HardwareInfo &hardware_info);
-  void set_initial_pose();
-  bool apply_initial_pose_override(const hardware_interface::HardwareInfo &hardware_info);
+  int find_keyframe_by_name(const std::string &name);
+  bool load_keyframe(const hardware_interface::HardwareInfo &hardware_info);
   void get_joint_limits(
     urdf::JointConstSharedPtr urdf_joint, joint_limits::JointLimits &joint_limits);
   control_toolbox::Pid get_pid_gains(

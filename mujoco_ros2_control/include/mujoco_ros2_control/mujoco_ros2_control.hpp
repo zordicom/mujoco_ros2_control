@@ -35,6 +35,7 @@
 
 #include "mujoco_ros2_control/mujoco_system.hpp"
 #include "mujoco_ros2_control_msgs/srv/apply_external_wrench.hpp"
+#include "mujoco_ros2_control_msgs/srv/reset_to_keyframe.hpp"
 
 namespace mujoco_ros2_control
 {
@@ -52,6 +53,9 @@ private:
   void handle_apply_external_wrench(
     const std::shared_ptr<mujoco_ros2_control_msgs::srv::ApplyExternalWrench::Request> request,
     std::shared_ptr<mujoco_ros2_control_msgs::srv::ApplyExternalWrench::Response> response);
+  void handle_reset_to_keyframe(
+    const std::shared_ptr<mujoco_ros2_control_msgs::srv::ResetToKeyframe::Request> request,
+    std::shared_ptr<mujoco_ros2_control_msgs::srv::ResetToKeyframe::Response> response);
 
   rclcpp::Node::SharedPtr node_;
   mjModel *mj_model_;
@@ -88,6 +92,18 @@ private:
   rclcpp::Service<mujoco_ros2_control_msgs::srv::ApplyExternalWrench>::SharedPtr apply_external_wrench_srv_;
   std::mutex active_wrench_mutex_;
   ActiveWrench active_wrench_;
+
+  // Keyframe reset (runtime reset to specific keyframes)
+  struct PendingKeyframeReset
+  {
+    std::string keyframe;
+    bool pending = false;
+  };
+  rclcpp::Service<mujoco_ros2_control_msgs::srv::ResetToKeyframe>::SharedPtr reset_to_keyframe_srv_;
+  std::mutex reset_keyframe_mutex_;
+  PendingKeyframeReset pending_reset_;
+
+  std::vector<MujocoSystemInterface*> mujoco_systems_;
 };
 }  // namespace mujoco_ros2_control
 

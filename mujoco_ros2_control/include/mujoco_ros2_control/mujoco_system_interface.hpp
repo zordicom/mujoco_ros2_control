@@ -37,6 +37,8 @@ public:
     mjModel *mujoco_model, mjData *mujoco_data, const urdf::Model &urdf_model,
     const hardware_interface::HardwareInfo &hardware_info) = 0;
 
+  virtual bool reset_to_keyframe(const std::string &keyframe_name_or_idx) = 0;
+
 protected:
 };
 }  // namespace mujoco_ros2_control

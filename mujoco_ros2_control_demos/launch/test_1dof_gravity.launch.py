@@ -32,28 +32,23 @@ def generate_launch_description():
     urdf_file = pkg_share / "urdf" / "test_1dof_gravity.xacro.urdf"
     mujoco_model = pkg_share / "mujoco_models" / "test_1dof_gravity.xml"
     controller_config = pkg_share / "config" / "test_1dof_gravity.yaml"
-    initial_pose_config = pkg_share / "config" / "initial_pose_test.yaml"
 
     # Read URDF
-    with open(urdf_file, "r") as f:
-        robot_description = f.read()
+    robot_description = Path(urdf_file).read_text()
 
     # MuJoCo node with ros2_control
     mujoco_node = Node(
         package="mujoco_ros2_control",
         executable="mujoco_ros2_control",
         parameters=[
+            controller_config,
             {
                 "robot_description": robot_description,
                 "mujoco_model_path": str(mujoco_model),
-                "headless": True,  # No viewer
-                "unpause": True,  # Start simulation immediately
-                "initial_pose": "test_pose",  # Name of pose in config
-                "initial_pose_config": str(
-                    initial_pose_config
-                ),  # Path to YAML with poses
+                "headless": True,  # No viewer window
+                "initial_keyframe": "test_pose",  # Name of keyframe in XML
+                "use_sim_time": True,  # Use MuJoCo simulation clock
             },
-            controller_config,
         ],
         output="screen",
     )

@@ -3,9 +3,14 @@
 
   <option timestep="0.001" gravity="0 0 -9.81"/>
 
-  <!-- Set initial position at 0.5 rad where gravity has significant effect -->
+  <!-- Keyframes for testing different initial poses -->
   <keyframe>
     <key name="test_pose" qpos="0.5"/>
+    <key name="home" qpos="0.0"/>
+    <key name="pos_small" qpos="0.5"/>
+    <key name="pos_large" qpos="1.0"/>
+    <key name="neg_small" qpos="-0.5"/>
+    <key name="neg_large" qpos="-1.0"/>
   </keyframe>
 
   <asset>

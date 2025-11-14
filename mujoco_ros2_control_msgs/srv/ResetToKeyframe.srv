@@ -1,0 +1,5 @@
+# Reset simulation to a specific keyframe
+string keyframe  # Keyframe name or numeric index (e.g., "home", "0")
+---
+bool success
+string message
