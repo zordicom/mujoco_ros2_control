@@ -296,14 +296,14 @@ void MujocoRos2Control::update()
     auto frozen_time_sec = static_cast<int>(mj_data_->time);
     auto frozen_time_nsec = static_cast<int>((mj_data_->time - frozen_time_sec) * 1e9);
     rclcpp::Time frozen_time(frozen_time_sec, frozen_time_nsec, RCL_ROS_TIME);
-    
+
     // Run controller manager with zero period so controllers can be managed
     // but commands won't affect the (frozen) simulation
     rclcpp::Duration zero_period(0, 0);
     controller_manager_->read(frozen_time, zero_period);
     controller_manager_->update(frozen_time, zero_period);
     controller_manager_->write(frozen_time, zero_period);
-    
+
     // Publish frozen time
     publish_sim_time(frozen_time);
     return;
@@ -466,7 +466,32 @@ void MujocoRos2Control::handle_reset_to_keyframe(
 {
   std::string keyframe = request->keyframe;
 
-  // Set flag for update loop to execute reset (thread-safe)
+  // Validate keyframe exists before queuing
+  int key_id = -1;
+  
+  // Try to parse as integer index first
+  try {
+    key_id = std::stoi(keyframe);
+    if (key_id < 0 || key_id >= mj_model_->nkey) {
+      response->success = false;
+      response->message = "Keyframe index " + keyframe + " out of range [0, " + 
+                          std::to_string(mj_model_->nkey - 1) + "]";
+      RCLCPP_WARN(logger_, "reset_to_keyframe: %s", response->message.c_str());
+      return;
+    }
+  }
+  catch (const std::exception&) {
+    // Not an integer, try as name
+    key_id = mj_name2id(mj_model_, mjOBJ_KEY, keyframe.c_str());
+    if (key_id < 0) {
+      response->success = false;
+      response->message = "Keyframe '" + keyframe + "' not found in model";
+      RCLCPP_WARN(logger_, "reset_to_keyframe: %s", response->message.c_str());
+      return;
+    }
+  }
+
+  // Keyframe is valid, queue the reset
   {
     std::lock_guard<std::mutex> lock(reset_keyframe_mutex_);
     pending_reset_.keyframe = keyframe;
@@ -475,7 +500,7 @@ void MujocoRos2Control::handle_reset_to_keyframe(
 
   response->success = true;
   response->message = "Keyframe reset queued: " + keyframe;
-  RCLCPP_INFO(logger_, "reset_to_keyframe SERVICE RECEIVED: keyframe='%s'", keyframe.c_str());
+  RCLCPP_INFO(logger_, "reset_to_keyframe SERVICE RECEIVED: keyframe='%s' (id=%d)", keyframe.c_str(), key_id);
 }
 
 void MujocoRos2Control::handle_simulation_control(
@@ -555,6 +580,30 @@ void MujocoRos2Control::handle_simulation_control(
         response->current_state = (sim_state_ == SimulationState::PAUSED) ? "PAUSED" : "RUNNING";
         RCLCPP_WARN(logger_, "simulation_control: Cannot reset, no initial keyframe configured");
         return;
+      }
+
+      // Validate initial keyframe exists
+      int key_id = -1;
+      try {
+        key_id = std::stoi(initial_keyframe_name_);
+        if (key_id < 0 || key_id >= mj_model_->nkey) {
+          response->success = false;
+          response->message = "Initial keyframe index out of range";
+          response->current_state = (sim_state_ == SimulationState::PAUSED) ? "PAUSED" : "RUNNING";
+          RCLCPP_WARN(logger_, "simulation_control: Initial keyframe '%s' out of range", 
+                      initial_keyframe_name_.c_str());
+          return;
+        }
+      }
+      catch (const std::exception&) {
+        key_id = mj_name2id(mj_model_, mjOBJ_KEY, initial_keyframe_name_.c_str());
+        if (key_id < 0) {
+          response->success = false;
+          response->message = "Initial keyframe '" + initial_keyframe_name_ + "' not found in model";
+          response->current_state = (sim_state_ == SimulationState::PAUSED) ? "PAUSED" : "RUNNING";
+          RCLCPP_WARN(logger_, "simulation_control: %s", response->message.c_str());
+          return;
+        }
       }
 
       // Queue the keyframe reset
