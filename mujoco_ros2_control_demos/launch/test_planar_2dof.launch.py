@@ -1,10 +1,11 @@
 """
 Launch file for 2-DOF planar arm controller demonstrations.
 
-This test uses a HORIZONTAL 2-link planar arm (not a cartpole!) with three controllers:
+This test uses a HORIZONTAL 2-link planar arm (not a cartpole!) with four Zordi controllers:
   1. zordi_mit_controller: Gravity compensation and trajectory tracking (joint space)
-  2. zordi_cartesian_controller: Cartesian impedance control
-  3. zordi_cartesian_rnea_controller: Cartesian control with full inverse dynamics (RNEA)
+  2. zordi_mit_rnea_controller: Joint space control with full inverse dynamics (RNEA)
+  3. zordi_cartesian_controller: Cartesian impedance control
+  4. zordi_cartesian_rnea_controller: Cartesian control with full inverse dynamics (RNEA)
 
 Test objectives:
   Example 1 (zordi_mit_controller):
@@ -12,12 +13,17 @@ Test objectives:
     - Trajectory tracking in joint space
     - Stable operation without pause/unpause issues
 
-  Example 2 (zordi_cartesian_controller):
+  Example 2 (zordi_mit_rnea_controller):
+    - Joint space control with full inverse dynamics
+    - Improved tracking accuracy over base controller
+    - Acceleration feedforward for dynamic motion
+
+  Example 3 (zordi_cartesian_controller):
     - Verify Cartesian impedance control
     - End-effector pose tracking
     - SE(3) geodesic trajectory interpolation
 
-  Example 3 (zordi_cartesian_rnea_controller):
+  Example 4 (zordi_cartesian_rnea_controller):
     - Cartesian control with full inverse dynamics
     - Improved tracking accuracy over base controller
     - Same trajectory interface as base controller
@@ -112,6 +118,18 @@ def generate_launch_description():
         output="screen",
     )
 
+    load_zordi_mit_rnea_controller = ExecuteProcess(
+        cmd=[
+            "ros2",
+            "control",
+            "load_controller",
+            "--set-state",
+            "inactive",
+            "zordi_mit_rnea_controller",
+        ],
+        output="screen",
+    )
+
     load_zordi_cartesian_rnea_controller = ExecuteProcess(
         cmd=[
             "ros2",
@@ -129,10 +147,11 @@ def generate_launch_description():
             mujoco_node,
             robot_state_pub_node,
             # Load controllers when mujoco node starts (standard mujoco_ros2_control pattern)
-            # All controllers are loaded in inactive state - activate manually as needed:
-            #   - zordi_mit_controller: For gravity comp / trajectory tracking (Example 1)
-            #   - zordi_cartesian_controller: For Cartesian impedance control (Example 2)
-            #   - zordi_cartesian_rnea_controller: For Cartesian control with full inverse dynamics
+            # All four controllers are loaded in inactive state - activate manually as needed:
+            #   - zordi_mit_controller: Joint space gravity comp and trajectory tracking
+            #   - zordi_mit_rnea_controller: Joint space with full inverse dynamics (RNEA)
+            #   - zordi_cartesian_controller: Cartesian impedance control
+            #   - zordi_cartesian_rnea_controller: Cartesian control with full inverse dynamics
             # NOTE: MuJoCo pause/unpause transition may cause initial velocity perturbations
             # This is a known mujoco_ros2_control limitation, not a controller issue.
             RegisterEventHandler(
@@ -141,6 +160,7 @@ def generate_launch_description():
                     on_start=[
                         load_joint_state_broadcaster,
                         load_zordi_mit_controller,
+                        load_zordi_mit_rnea_controller,
                         load_zordi_cartesian_controller,
                         load_zordi_cartesian_rnea_controller,
                     ],
