@@ -12,6 +12,12 @@ controller_manager:
     zordi_mit_controller:
       type: zordi_mit_controller/ZordiMITController
 
+    zordi_mit_rnea_controller:
+      type: zordi_mit_controller/ZordiMITRNEAController
+
+    zordi_mit_gravity_controller:
+      type: zordi_mit_controller/ZordiMITController
+
     zordi_cartesian_controller:
       type: zordi_mit_controller/ZordiCartesianController
 
@@ -163,3 +169,45 @@ zordi_cartesian_rnea_controller:
     torque_limits: [50.0, 25.0]  # Nm
     max_cartesian_velocity: 1.0  # m/s
     max_cartesian_acceleration: 5.0  # m/s²
+
+# Zordi MIT RNEA Controller (Joint space with full inverse dynamics)
+zordi_mit_rnea_controller:
+  ros__parameters:
+    joints:
+      - joint1
+      - joint2
+
+    command_interfaces:
+      - effort
+
+    state_interfaces:
+      - position
+      - velocity
+
+    # RNEA mode with full inverse dynamics
+    gravity_comp_only: false
+    use_gravity_compensation: false  # Zero gravity environment
+    compute_pd_internally: true  # Use software PD
+
+    # PD gains for trajectory tracking
+    kp: [100.0, 50.0]  # N·m/rad
+    kd: [10.0, 5.0]    # N·m·s/rad
+
+# Zordi MIT Gravity Controller (Pure gravity compensation, no trajectory tracking)
+zordi_mit_gravity_controller:
+  ros__parameters:
+    joints:
+      - joint1
+      - joint2
+
+    command_interfaces:
+      - effort
+
+    state_interfaces:
+      - position
+      - velocity
+
+    # Pure gravity compensation mode (fully backdrivable)
+    gravity_comp_only: true
+    use_gravity_compensation: false  # Zero gravity environment
+    compute_pd_internally: false  # No PD needed in gravity comp only mode
