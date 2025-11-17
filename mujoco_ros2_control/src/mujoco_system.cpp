@@ -149,8 +149,8 @@ hardware_interface::return_type MujocoSystem::write(
       else
       {
         // Neutralize: either not claimed or MIT mode
-        // WARNING: This neutralization (ctrl = q) assumes kv=0 for the position actuator.
-        // If kv != 0, the position actuator will produce damping torque: τ = -kv*qd
+        // For MuJoCo position actuators: τ = kp*(ctrl - q)
+        // To achieve zero torque: ctrl = q
         mj_data_->ctrl[joint_state.mj_pos_actuator_id] = q;
 
         // Check if position interface is exposed but not active, and kv != 0
@@ -220,11 +220,14 @@ hardware_interface::return_type MujocoSystem::write(
           }
 
           // Velocity PD term (kd * velocity_error)
+          // NOTE: For MIT mode, velocity_command is the desired velocity (feedforward)
+          // and velocity_kp acts as the damping gain (Kd in traditional PD control)
           if (joint_state.velocity_command_active && joint_state.is_pid_enabled)
           {
             double vel_err = joint_state.velocity_command - qd;
             auto vel_gains = joint_state.velocity_pid.getGains();
-            tau_pd += vel_gains.d_gain_ * vel_err;
+            // Use p_gain (velocity_kp) as damping coefficient, not d_gain (velocity_kd)
+            tau_pd += vel_gains.p_gain_ * vel_err;
           }
 
           tau_total += tau_pd;
@@ -402,6 +405,28 @@ void MujocoSystem::register_joints(
                 joint_state.mj_pos_actuator_id,
                 joint_state.mj_vel_actuator_id,
                 joint_state.mj_tau_actuator_id);
+
+    // Debug: Log actuator parameters to understand MuJoCo's internal representation
+    auto log_actuator_params = [&](int act_id, const std::string& name) {
+      if (act_id >= 0) {
+        const int dyn_type = mj_model_->actuator_dyntype[act_id];
+        const int gain_type = mj_model_->actuator_gaintype[act_id];
+        const int bias_type = mj_model_->actuator_biastype[act_id];
+        const double gain0 = mj_model_->actuator_gainprm[act_id * 10];
+        const double gain1 = mj_model_->actuator_gainprm[act_id * 10 + 1];
+        const double bias0 = mj_model_->actuator_biasprm[act_id * 10];
+        const double bias1 = mj_model_->actuator_biasprm[act_id * 10 + 1];
+        const double bias2 = mj_model_->actuator_biasprm[act_id * 10 + 2];
+        
+        RCLCPP_INFO(logger_, 
+          "  %s: dyn=%d, gain_t=%d, bias_t=%d, gain=[%.2f,%.2f], bias=[%.2f,%.2f,%.2f]",
+          name.c_str(), dyn_type, gain_type, bias_type, gain0, gain1, bias0, bias1, bias2);
+      }
+    };
+    
+    log_actuator_params(joint_state.mj_pos_actuator_id, "pos");
+    log_actuator_params(joint_state.mj_vel_actuator_id, "vel");
+    log_actuator_params(joint_state.mj_tau_actuator_id, "tau");
 
     // Check which command interfaces are declared in URDF
     // Used for both validation and MIT mode compatibility checks

@@ -1,0 +1,103 @@
+<!--
+Copyright 2025 Zordi, Inc. All rights reserved.
+
+MuJoCo model for 2-DOF planar robot arm (horizontal)
+-->
+<mujoco model="cartpole_2dof">
+  <compiler angle="radian" meshdir="." autolimits="true"/>
+
+  <option timestep="0.001" gravity="0 0 0">
+    <flag contact="disable"/>
+  </option>
+
+  <visual>
+    <global offwidth="1920" offheight="1080"/>
+    <quality shadowsize="4096"/>
+    <map force="0.1" fogstart="3" fogend="5"/>
+  </visual>
+
+  <asset>
+    <texture name="grid" type="2d" builtin="checker" width="512" height="512" rgb1="0.2 0.2 0.2" rgb2="0.3 0.3 0.3"/>
+    <material name="grid" texture="grid" texrepeat="1 1" texuniform="true" reflectance="0.2"/>
+    <material name="blue" rgba="0.2 0.4 0.8 1"/>
+    <material name="red" rgba="0.8 0.2 0.2 1"/>
+    <material name="green" rgba="0.2 0.8 0.2 1"/>
+  </asset>
+
+  <worldbody>
+    <!-- Ground plane -->
+    <geom name="floor" type="plane" size="2 2 0.1" material="grid" condim="3"/>
+    
+    <!-- Lighting -->
+    <light directional="true" diffuse="0.8 0.8 0.8" specular="0.2 0.2 0.2" pos="0 0 5" dir="0 0 -1"/>
+    <light directional="true" diffuse="0.4 0.4 0.4" specular="0.1 0.1 0.1" pos="0 0 4" dir="0 0 -1"/>
+
+    <!-- Base (fixed to world, raised above ground) -->
+    <body name="base_link" pos="0 0 0.1">
+      <geom name="base" type="box" size="0.05 0.05 0.05" rgba="0.5 0.5 0.5 1"/>
+      
+      <!-- Link 1 (extends horizontally in +X direction) -->
+      <body name="link1" pos="0 0 0">
+        <joint name="joint1" axis="0 0 1" limited="true" range="-3.14 3.14" damping="0.1"/>
+        <geom name="link1" type="cylinder" size="0.03 0.25" pos="0.25 0 0" quat="0.707 0 0.707 0" material="blue"/>
+        <inertial pos="0.25 0 0" mass="1.0" diaginertia="0.001 0.021 0.021"/>
+        
+        <!-- Link 2 (extends horizontally in +X direction from end of link1) -->
+        <body name="link2" pos="0.5 0 0">
+          <joint name="joint2" axis="0 0 1" limited="true" range="-3.14 3.14" damping="0.1"/>
+          <geom name="link2" type="cylinder" size="0.025 0.25" pos="0.25 0 0" quat="0.707 0 0.707 0" material="red"/>
+          <inertial pos="0.25 0 0" mass="0.5" diaginertia="0.0005 0.011 0.011"/>
+          
+          <!-- End-effector -->
+          <body name="ee_link" pos="0.5 0 0">
+            <geom name="ee" type="sphere" size="0.04" material="green"/>
+            <inertial pos="0 0 0" mass="0.01" diaginertia="0.00001 0.00001 0.00001"/>
+            <!-- Site for visualization and tracking -->
+            <site name="ee_site" pos="0 0 0" size="0.01" rgba="1 1 0 1"/>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <!-- MIT mode actuators for joint1 (same pattern as test_1dof_gravity.xml) -->
+    <!-- Position actuator: kp=100, kv=0 -->
+    <position name="act_pos_joint1" joint="joint1"
+              kp="100.0" kv="0.0"
+              ctrlrange="-3.14 3.14" forcerange="-50 50"/>
+    
+    <!-- Velocity actuator: kv=10 (auto-neutralizes when ctrl=qd) -->
+    <velocity name="act_vel_joint1" joint="joint1"
+              kv="10.0"
+              ctrlrange="-10 10" forcerange="-50 50"/>
+    
+    <!-- Torque actuator: Direct force control -->
+    <motor name="act_tau_joint1" joint="joint1"
+           ctrlrange="-50 50" forcerange="-50 50"/>
+    
+    <!-- MIT mode actuators for joint2 (same pattern as test_1dof_gravity.xml) -->
+    <!-- Position actuator: kp=50, kv=0 -->
+    <position name="act_pos_joint2" joint="joint2"
+              kp="50.0" kv="0.0"
+              ctrlrange="-3.14 3.14" forcerange="-25 25"/>
+    
+    <!-- Velocity actuator: kv=5 (auto-neutralizes when ctrl=qd) -->
+    <velocity name="act_vel_joint2" joint="joint2"
+              kv="5.0"
+              ctrlrange="-10 10" forcerange="-25 25"/>
+    
+    <!-- Torque actuator: Direct force control -->
+    <motor name="act_tau_joint2" joint="joint2"
+           ctrlrange="-25 25" forcerange="-25 25"/>
+  </actuator>
+
+  <keyframe>
+    <key name="home" qpos="0.3 -0.2" qvel="0 0"/>
+    <key name="bent" qpos="0.5 -0.5" qvel="0 0"/>
+    <key name="straight" qpos="0 0" qvel="0 0"/>
+    <key name="right" qpos="1.57 0" qvel="0 0"/>
+    <key name="left" qpos="-1.57 0" qvel="0 0"/>
+  </keyframe>
+</mujoco>
+

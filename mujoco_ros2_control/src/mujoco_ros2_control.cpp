@@ -304,6 +304,11 @@ void MujocoRos2Control::update()
     controller_manager_->update(frozen_time, zero_period);
     controller_manager_->write(frozen_time, zero_period);
 
+    // Update qfrc_actuator to reflect current ctrl values (for correct effort readings)
+    // This ensures joint_state_broadcaster publishes correct effort values even when paused
+    // mj_forward() updates derived quantities (qfrc_actuator, etc.) without advancing time
+    mj_forward(mj_model_, mj_data_);
+
     // Publish frozen time
     publish_sim_time(frozen_time);
     return;

@@ -1,0 +1,103 @@
+# Copyright 2025 Zordi, Inc. All rights reserved.
+#
+# Controller configuration for 2-DOF planar arm (horizontal double pendulum)
+
+controller_manager:
+  ros__parameters:
+    update_rate: 1000  # Hz
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    zordi_mit_controller:
+      type: zordi_mit_controller/ZordiMITController
+
+    zordi_cartesian_controller:
+      type: zordi_mit_controller/ZordiCartesianController
+
+# Joint state broadcaster
+joint_state_broadcaster:
+  ros__parameters:
+    use_local_topics: false
+
+# Zordi MIT Controller (Gravity Compensation / Trajectory Tracking)
+zordi_mit_controller:
+  ros__parameters:
+    joints:
+      - joint1
+      - joint2
+
+    command_interfaces:
+      - effort
+
+    state_interfaces:
+      - position
+      - velocity
+
+    # Gravity compensation mode (no trajectory tracking, fully backdrivable)
+    gravity_comp_only: true
+    use_gravity_compensation: false  # Zero gravity environment
+    compute_pd_internally: false  # No PD needed in gravity comp only mode
+
+# Zordi Cartesian Controller
+zordi_cartesian_controller:
+  ros__parameters:
+    joints:
+      - joint1
+      - joint2
+
+    command_interfaces:
+      # - position  # Disabled: Testing pure torque control
+      # - velocity  # Disabled: MuJoCo neutralizes with qd in MIT mode, causing instability
+      - effort
+
+    state_interfaces:
+      - position
+      - velocity
+
+    # Control mode
+    compute_pd_internally: true  # Use software PD (pure torque control)
+
+    # Frames
+    end_effector_frame: "ee_link"
+    base_frame: "base_link"
+
+    # Cartesian stiffness (Moderate to overcome actuator biases)
+    stiffness:
+      translation:
+        x: 500.0  # N/m (moderate to overcome actuator spring forces)
+        y: 500.0  # N/m (moderate to overcome actuator spring forces)
+        z: 0.0     # Not used (planar XY)
+      rotation:
+        x: 0.0     # Not used (planar)
+        y: 0.0     # Not used (planar)
+        z: 50.0   # Nm/rad (moderate for planar rotation)
+
+    # Cartesian damping (auto-compute for critical damping)
+    damping:
+      translation:
+        x: 0.0  # Auto: 2*sqrt(500) ≈ 44.7
+        y: 0.0  # Auto: 2*sqrt(500) ≈ 44.7
+        z: 0.0
+      rotation:
+        x: 0.0
+        y: 0.0
+        z: 0.0  # Auto: 2*sqrt(50) ≈ 14.1
+
+    # Nullspace control (posture)
+    nullspace:
+      stiffness: 5.0
+      damping: 0.0  # Auto-compute
+      weights: [1.0, 1.0]
+      projector_type: "dynamic"  # Use dynamic nullspace projection
+
+    # Control features
+    use_operational_space: false
+    use_gravity_compensation: false  # No gravity in simulation
+    use_coriolis_compensation: false
+
+    # Safety limits
+    torque_limits: [50.0, 25.0]  # Nm
+    max_cartesian_velocity: 1.0  # m/s
+    max_cartesian_acceleration: 5.0  # m/s²
+
