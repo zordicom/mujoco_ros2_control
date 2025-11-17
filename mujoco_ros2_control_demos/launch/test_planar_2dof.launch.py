@@ -158,15 +158,15 @@ def generate_launch_description():
     return LaunchDescription([
         mujoco_node,
         robot_state_pub_node,
-            # Load controllers when mujoco node starts (standard mujoco_ros2_control pattern)
-            # All five controllers are loaded in inactive state - activate manually as needed:
-            #   - zordi_mit_controller: Joint space gravity comp and trajectory tracking
-            #   - zordi_mit_rnea_controller: Joint space with full inverse dynamics (RNEA)
-            #   - zordi_mit_gravity_controller: Pure gravity comp, no trajectory tracking
-            #   - zordi_cartesian_controller: Cartesian impedance control
-            #   - zordi_cartesian_rnea_controller: Cartesian control with full inverse dynamics
-            # NOTE: MuJoCo pause/unpause transition may cause initial velocity perturbations
-            # This is a known mujoco_ros2_control limitation, not a controller issue.
+        # Load controllers when mujoco node starts (standard mujoco_ros2_control pattern)
+        # All five controllers are loaded in inactive state - activate manually as needed:
+        #   - zordi_mit_controller: Joint space gravity comp and trajectory tracking
+        #   - zordi_mit_rnea_controller: Joint space with full inverse dynamics (RNEA)
+        #   - zordi_mit_gravity_controller: Pure gravity comp, no trajectory tracking
+        #   - zordi_cartesian_controller: Cartesian impedance control
+        #   - zordi_cartesian_rnea_controller: Cartesian control with full inverse dynamics
+        # NOTE: MuJoCo pause/unpause transition may cause initial velocity perturbations
+        # This is a known mujoco_ros2_control limitation, not a controller issue.
         RegisterEventHandler(
             event_handler=OnProcessStart(
                 target_action=mujoco_node,

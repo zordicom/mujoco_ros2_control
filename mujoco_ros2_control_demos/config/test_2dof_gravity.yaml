@@ -1,0 +1,294 @@
+# Copyright 2025 Zordi, Inc. All rights reserved.
+#
+# Controller configuration for 2-DOF vertical double pendulum with gravity
+
+controller_manager:
+  ros__parameters:
+    update_rate: 1000  # Hz
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    zordi_grav_comp_controller:
+      type: zordi_mit_controller/ZordiMITController
+
+    zordi_joint_trajectory_controller:
+      type: zordi_mit_controller/ZordiMITController
+
+    zordi_joint_rnea_controller:
+      type: zordi_mit_controller/ZordiMITRNEAController
+
+    zordi_cartesian_controller:
+      type: zordi_mit_controller/ZordiCartesianController
+
+    zordi_cartesian_rnea_controller:
+      type: zordi_mit_controller/ZordiCartesianRNEAController
+
+    joint_trajectory_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+# Joint state broadcaster
+joint_state_broadcaster:
+  ros__parameters:
+    use_local_topics: false
+
+# Zordi Gravity Compensation Only Controller
+# This controller ONLY applies gravity compensation torques (no trajectory tracking)
+# The double pendulum will be backdrivable and hold position purely via gravity comp
+zordi_grav_comp_controller:
+  ros__parameters:
+    joints:
+      - joint1
+      - joint2
+
+    # Gravity comp only mode - pure gravity compensation, no trajectory tracking
+    gravity_comp_only: true
+
+    # Claim only effort interface (no position/velocity)
+    command_interfaces:
+      - effort
+
+    state_interfaces:
+      - position
+      - velocity
+
+    # Enable gravity compensation (required)
+    use_gravity_compensation: true
+
+# Zordi Joint Trajectory Controller (Gravity Compensation / Trajectory Tracking)
+zordi_joint_trajectory_controller:
+  ros__parameters:
+    joints:
+      - joint1
+      - joint2
+
+    command_interfaces:
+      - position
+      - velocity
+      - effort
+
+    state_interfaces:
+      - position
+      - velocity
+
+    # Enable gravity compensation (key difference from zero-gravity examples)
+    use_gravity_compensation: true
+    compute_pd_internally: false  # Use hardware PD (MIT mode)
+
+    # Tolerances for trajectory execution
+    allow_partial_joints_goal: false
+    allow_integration_in_goal_trajectories: true
+
+    constraints:
+      stopped_velocity_tolerance: 0.01
+      goal_time: 0.5
+
+    joint1:
+      trajectory: 0.05
+      goal: 0.05
+
+    joint2:
+      trajectory: 0.05
+      goal: 0.05
+
+# Zordi Joint RNEA Controller (Full Inverse Dynamics)
+zordi_joint_rnea_controller:
+  ros__parameters:
+    joints:
+      - joint1
+      - joint2
+
+    command_interfaces:
+      - position
+      - velocity
+      - effort
+
+    state_interfaces:
+      - position
+      - velocity
+
+    # Enable gravity compensation
+    use_gravity_compensation: true
+    compute_pd_internally: false  # Use hardware PD (MIT mode)
+
+    # Tolerances for trajectory execution
+    allow_partial_joints_goal: false
+    allow_integration_in_goal_trajectories: true
+
+    constraints:
+      stopped_velocity_tolerance: 0.01
+      goal_time: 0.5
+
+    joint1:
+      trajectory: 0.05
+      goal: 0.05
+
+    joint2:
+      trajectory: 0.05
+      goal: 0.05
+
+# Zordi Cartesian Controller
+zordi_cartesian_controller:
+  ros__parameters:
+    joints:
+      - joint1
+      - joint2
+
+    command_interfaces:
+      - effort
+
+    state_interfaces:
+      - position
+      - velocity
+
+    # Control mode
+    compute_pd_internally: true  # Use software PD (pure torque control)
+
+    # Frames
+    end_effector_frame: "ee_link"
+    base_frame: "world"
+
+    # Cartesian stiffness
+    stiffness:
+      translation:
+        x: 200.0  # N/m
+        y: 200.0  # N/m
+        z: 200.0  # N/m
+      rotation:
+        x: 20.0   # Nm/rad
+        y: 20.0   # Nm/rad
+        z: 20.0   # Nm/rad
+
+    # Cartesian damping (auto-compute for critical damping)
+    damping:
+      translation:
+        x: 0.0  # Auto: 2*sqrt(200) ≈ 28.3
+        y: 0.0  # Auto: 2*sqrt(200) ≈ 28.3
+        z: 0.0  # Auto: 2*sqrt(200) ≈ 28.3
+      rotation:
+        x: 0.0  # Auto: 2*sqrt(20) ≈ 8.9
+        y: 0.0  # Auto: 2*sqrt(20) ≈ 8.9
+        z: 0.0  # Auto: 2*sqrt(20) ≈ 8.9
+
+    # Nullspace control (posture)
+    nullspace:
+      stiffness: 5.0
+      damping: 0.0  # Auto-compute
+      weights: [1.0, 1.0]
+      projector_type: "dynamic"  # Use dynamic nullspace projection
+
+    # Control features (CRITICAL: Enable gravity compensation)
+    use_operational_space: false
+    use_gravity_compensation: true  # Enable gravity compensation
+    use_coriolis_compensation: false
+
+    # Safety limits
+    torque_limits: [50.0, 25.0]  # Nm
+    max_cartesian_velocity: 1.0  # m/s
+    max_cartesian_acceleration: 5.0  # m/s²
+
+# Zordi Cartesian RNEA Controller (with full inverse dynamics)
+zordi_cartesian_rnea_controller:
+  ros__parameters:
+    joints:
+      - joint1
+      - joint2
+
+    command_interfaces:
+      - effort
+
+    state_interfaces:
+      - position
+      - velocity
+
+    # Control mode
+    compute_pd_internally: true  # Use software PD (pure torque control)
+
+    # Frames
+    end_effector_frame: "ee_link"
+    base_frame: "world"
+
+    # Cartesian stiffness (same as base controller)
+    stiffness:
+      translation:
+        x: 200.0
+        y: 200.0
+        z: 200.0
+      rotation:
+        x: 20.0
+        y: 20.0
+        z: 20.0
+
+    # Cartesian damping (auto-compute for critical damping)
+    damping:
+      translation:
+        x: 0.0
+        y: 0.0
+        z: 0.0
+      rotation:
+        x: 0.0
+        y: 0.0
+        z: 0.0
+
+    # Nullspace control
+    nullspace:
+      stiffness: 5.0
+      damping: 0.0
+      weights: [1.0, 1.0]
+      projector_type: "dynamic"
+
+    # Control features (CRITICAL: Enable gravity compensation)
+    use_operational_space: false
+    use_gravity_compensation: true  # Enable gravity compensation
+    use_coriolis_compensation: false
+
+    # Safety limits
+    torque_limits: [50.0, 25.0]  # Nm
+    max_cartesian_velocity: 1.0  # m/s
+    max_cartesian_acceleration: 5.0  # m/s²
+
+# ROS-native Joint Trajectory Controller (for comparison with Zordi controllers)
+# This is a standard ROS2 controller without gravity compensation
+# Uses position interface (most common ROS2 pattern) with hardware PD control
+# Expected to show steady-state errors due to lack of gravity compensation
+joint_trajectory_controller:
+  ros__parameters:
+    joints:
+      - joint1
+      - joint2
+
+    command_interfaces:
+      - position  # Standard position interface (most common in practice)
+
+    state_interfaces:
+      - position
+      - velocity
+
+    # Note: With position interface, this controller sends position commands
+    # directly to hardware. The actual control is done by MuJoCo actuators
+    # (kp=100, kp=50) which do not compensate for gravity.
+    # This demonstrates why gravity compensation is essential!
+
+    allow_partial_joints_goal: false
+    allow_integration_in_goal_trajectories: true
+
+    constraints:
+      stopped_velocity_tolerance: 0.01
+      goal_time: 0.5
+
+    joint1:
+      trajectory: 0.05
+      goal: 0.05
+
+    joint2:
+      trajectory: 0.05
+      goal: 0.05
+
+# Physics for this double pendulum:
+#   Link 1: Mass=1.0 kg, COM=0.25m below joint1
+#   Link 2: Mass=0.5 kg, COM=0.25m below joint2
+#   Max gravity torque at joint1: τ_g1 ≈ 9.81 * (1.0*0.25 + 0.5*0.75) = 6.1 Nm (when horizontal)
+#   Max gravity torque at joint2: τ_g2 = 0.5*9.81*0.25 = 1.23 Nm (when horizontal)
+#
+# q=[0, 0]: Natural hanging configuration (stable equilibrium)
+# With gravity comp: robot can hold any configuration and track trajectories smoothly

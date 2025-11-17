@@ -1,0 +1,95 @@
+<!--
+Copyright 2025 Zordi, Inc. All rights reserved.
+
+MuJoCo model for 2-DOF vertical double pendulum with gravity compensation testing
+-->
+<mujoco model="test_2dof_gravity">
+  <compiler angle="radian" meshdir="." autolimits="true"/>
+
+  <option timestep="0.001" gravity="0 0 -9.81"/>
+
+  <!-- Keyframes for testing different initial poses -->
+  <keyframe>
+    <key name="test_pose" qpos="0.3 -0.2" qvel="0 0"/>
+    <key name="home" qpos="0.0 0.0" qvel="0 0"/>
+    <key name="hanging" qpos="-1.57 -1.57" qvel="0 0"/>
+    <key name="bent_forward" qpos="0.5 -0.5" qvel="0 0"/>
+    <key name="bent_back" qpos="-0.5 0.5" qvel="0 0"/>
+    <key name="horizontal" qpos="1.57 0.0" qvel="0 0"/>
+    <key name="folded" qpos="0.0 1.57" qvel="0 0"/>
+  </keyframe>
+
+  <asset>
+    <texture name="grid" type="2d" builtin="checker" width="512" height="512" rgb1="0.1 0.2 0.3" rgb2="0.2 0.3 0.4"/>
+    <material name="grid" texture="grid" texrepeat="1 1" texuniform="true" reflectance="0.2"/>
+  </asset>
+
+  <worldbody>
+    <light diffuse=".5 .5 .5" pos="0 0 3" dir="0 0 -1"/>
+    <geom name="floor" type="plane" size="10 10 0.05" material="grid"/>
+
+    <!-- Vertical double pendulum -->
+    <body name="link1" pos="0 0 1.5">
+      <!-- Joint 1: Rotates about Y-axis -->
+      <joint name="joint1" type="hinge" axis="0 1 0" range="-3.14 3.14" damping="0.1"/>
+
+      <!-- Link 1: 1kg mass, 0.5m length, COM at 0.25m below pivot -->
+      <inertial pos="0 0 -0.25" mass="1.0" diaginertia="0.0208 0.0208 0.001"/>
+
+      <!-- Visual: vertical bar -->
+      <geom name="link1_vis" type="box" size="0.025 0.025 0.25" pos="0 0 -0.25" rgba="0.2 0.4 0.8 1"/>
+
+      <!-- Link 2: extends from end of link 1 -->
+      <body name="link2" pos="0 0 -0.5">
+        <!-- Joint 2: Rotates about Y-axis -->
+        <joint name="joint2" type="hinge" axis="0 1 0" range="-3.14 3.14" damping="0.1"/>
+
+        <!-- Link 2: 0.5kg mass, 0.5m length, COM at 0.25m below pivot -->
+        <inertial pos="0 0 -0.25" mass="0.5" diaginertia="0.0104 0.0104 0.0005"/>
+
+        <!-- Visual: vertical bar -->
+        <geom name="link2_vis" type="box" size="0.02 0.02 0.25" pos="0 0 -0.25" rgba="0.8 0.2 0.2 1"/>
+
+        <!-- End-effector -->
+        <body name="ee_link" pos="0 0 -0.5">
+          <geom name="ee" type="sphere" size="0.04" rgba="0.2 0.8 0.2 1"/>
+          <inertial pos="0 0 0" mass="0.01" diaginertia="0.00001 0.00001 0.00001"/>
+          <!-- Site for visualization and tracking -->
+          <site name="ee_site" pos="0 0 0" size="0.01" rgba="1 1 0 1"/>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <!-- MIT mode actuators for joint1 -->
+    <!-- Position actuator: kp=100, kv=0 -->
+    <position name="act_pos_joint1" joint="joint1"
+              kp="100.0" kv="0.0"
+              ctrlrange="-3.14 3.14" forcerange="-50 50"/>
+
+    <!-- Velocity actuator: kv=10 (auto-neutralizes when ctrl=qd) -->
+    <velocity name="act_vel_joint1" joint="joint1"
+              kv="10.0"
+              ctrlrange="-2.0 2.0" forcerange="-50 50"/>
+
+    <!-- Torque actuator: Direct force control -->
+    <motor name="act_tau_joint1" joint="joint1"
+           ctrlrange="-50 50" forcerange="-50 50"/>
+
+    <!-- MIT mode actuators for joint2 -->
+    <!-- Position actuator: kp=50, kv=0 -->
+    <position name="act_pos_joint2" joint="joint2"
+              kp="50.0" kv="0.0"
+              ctrlrange="-3.14 3.14" forcerange="-25 25"/>
+
+    <!-- Velocity actuator: kv=5 (auto-neutralizes when ctrl=qd) -->
+    <velocity name="act_vel_joint2" joint="joint2"
+              kv="5.0"
+              ctrlrange="-2.0 2.0" forcerange="-25 25"/>
+
+    <!-- Torque actuator: Direct force control -->
+    <motor name="act_tau_joint2" joint="joint2"
+           ctrlrange="-25 25" forcerange="-25 25"/>
+  </actuator>
+</mujoco>

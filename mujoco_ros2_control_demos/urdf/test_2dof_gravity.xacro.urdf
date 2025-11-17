@@ -1,0 +1,132 @@
+<?xml version="1.0"?>
+<!--
+Copyright 2025 Zordi, Inc. All rights reserved.
+
+2-DOF vertical double pendulum for testing gravity compensation.
+
+This is a vertical double pendulum where q=[0,0] is the natural hanging configuration.
+Gravity compensation allows the robot to hold any configuration and track trajectories.
+-->
+<robot name="test_2dof_gravity">
+  <link name="world"/>
+
+  <!-- Link 1: 1 kg mass at 0.25m from pivot -->
+  <link name="link1">
+    <inertial>
+      <origin xyz="0.0 0.0 -0.25" rpy="0 0 0"/>  <!-- COM at 0.25m below pivot -->
+      <mass value="1.0"/>
+      <inertia ixx="0.0208" ixy="0.0" ixz="0.0"
+               iyy="0.0208" iyz="0.0" izz="0.001"/>
+    </inertial>
+    <visual>
+      <origin xyz="0.0 0.0 -0.25" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.05 0.05 0.5"/>
+      </geometry>
+      <material name="blue">
+        <color rgba="0.2 0.4 0.8 1"/>
+      </material>
+    </visual>
+  </link>
+
+  <!-- Vertical revolute joint 1 (rotates about Y-axis) -->
+  <joint name="joint1" type="revolute">
+    <axis xyz="0 1 0"/>  <!-- Y-axis rotation -->
+    <origin xyz="0 0 1.5" rpy="0 0 0"/>  <!-- Pivot at 1.5m height -->
+    <parent link="world"/>
+    <child link="link1"/>
+    <limit lower="-3.14" upper="3.14" effort="50.0" velocity="2.0"/>
+    <dynamics damping="0.1" friction="0.0"/>
+  </joint>
+
+  <!-- Link 2: 0.5 kg mass at 0.25m from pivot -->
+  <link name="link2">
+    <inertial>
+      <origin xyz="0.0 0.0 -0.25" rpy="0 0 0"/>  <!-- COM at 0.25m below pivot -->
+      <mass value="0.5"/>
+      <inertia ixx="0.0104" ixy="0.0" ixz="0.0"
+               iyy="0.0104" iyz="0.0" izz="0.0005"/>
+    </inertial>
+    <visual>
+      <origin xyz="0.0 0.0 -0.25" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.04 0.04 0.5"/>
+      </geometry>
+      <material name="red">
+        <color rgba="0.8 0.2 0.2 1"/>
+      </material>
+    </visual>
+  </link>
+
+  <!-- Vertical revolute joint 2 (rotates about Y-axis) -->
+  <joint name="joint2" type="revolute">
+    <axis xyz="0 1 0"/>  <!-- Y-axis rotation -->
+    <origin xyz="0 0 -0.5" rpy="0 0 0"/>  <!-- Attached at end of link1 -->
+    <parent link="link1"/>
+    <child link="link2"/>
+    <limit lower="-3.14" upper="3.14" effort="25.0" velocity="2.0"/>
+    <dynamics damping="0.1" friction="0.0"/>
+  </joint>
+
+  <!-- End-effector link (for Cartesian control) -->
+  <link name="ee_link">
+    <visual>
+      <geometry>
+        <sphere radius="0.04"/>
+      </geometry>
+      <material name="green">
+        <color rgba="0.2 0.8 0.2 1"/>
+      </material>
+    </visual>
+    <inertial>
+      <mass value="0.01"/>
+      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00001"/>
+    </inertial>
+  </link>
+
+  <joint name="link2_to_ee" type="fixed">
+    <parent link="link2"/>
+    <child link="ee_link"/>
+    <origin xyz="0 0 -0.5" rpy="0 0 0"/>  <!-- At end of link2 -->
+  </joint>
+
+  <!-- ROS2 Control -->
+  <ros2_control name="test_2dof_gravity" type="system">
+    <hardware>
+      <plugin>mujoco_ros2_control/MujocoSystem</plugin>
+    </hardware>
+
+    <joint name="joint1">
+      <command_interface name="position"/>
+      <command_interface name="velocity"/>
+      <command_interface name="effort"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+
+      <!-- Hardware PD gains for MuJoCo MIT mode (position/velocity actuators) -->
+      <param name="position_kp">100.0</param>
+      <param name="velocity_kp">10.0</param>
+      <!-- Software PD gains for Cartesian controller (when compute_pd_internally=true) -->
+      <param name="kp">100.0</param>
+      <param name="kd">10.0</param>
+    </joint>
+
+    <joint name="joint2">
+      <command_interface name="position"/>
+      <command_interface name="velocity"/>
+      <command_interface name="effort"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+
+      <!-- Hardware PD gains for MuJoCo MIT mode (position/velocity actuators) -->
+      <param name="position_kp">50.0</param>
+      <param name="velocity_kp">5.0</param>
+      <!-- Software PD gains for Cartesian controller (when compute_pd_internally=true) -->
+      <param name="kp">50.0</param>
+      <param name="kd">5.0</param>
+    </joint>
+  </ros2_control>
+</robot>
+
