@@ -187,11 +187,7 @@ zordi_mit_rnea_controller:
     # RNEA mode with full inverse dynamics
     gravity_comp_only: false
     use_gravity_compensation: false  # Zero gravity environment
-    compute_pd_internally: true  # Use software PD
-
-    # PD gains for trajectory tracking
-    kp: [100.0, 50.0]  # N·m/rad
-    kd: [10.0, 5.0]    # N·m·s/rad
+    compute_pd_internally: true  # Use software PD (loads gains from URDF)
 
 # Zordi MIT Gravity Controller (Pure gravity compensation, no trajectory tracking)
 zordi_mit_gravity_controller:
