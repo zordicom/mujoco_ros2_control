@@ -1,5 +1,10 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.10)
 project(mujoco_ros2_control)
+
+# Set policies to suppress warnings
+if(POLICY CMP0072)
+  cmake_policy(SET CMP0072 NEW)  # Prefer GLVND OpenGL libraries
+endif()
 
 # Default to C++14
 if(NOT CMAKE_CXX_STANDARD)
