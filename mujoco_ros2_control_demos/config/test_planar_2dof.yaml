@@ -43,10 +43,10 @@ zordi_mit_controller:
       - position
       - velocity
 
-    # Gravity compensation mode (no trajectory tracking, fully backdrivable)
-    gravity_comp_only: true
+    # Trajectory tracking mode with software PD
+    gravity_comp_only: false  # Enable trajectory tracking
     use_gravity_compensation: false  # Zero gravity environment
-    compute_pd_internally: false  # No PD needed in gravity comp only mode
+    compute_pd_internally: true  # Use software PD (loads gains from URDF)
 
 # Zordi Cartesian Controller
 zordi_cartesian_controller:
