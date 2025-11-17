@@ -45,7 +45,7 @@ zordi_mit_controller:
 
     # Trajectory tracking mode with software PD
     gravity_comp_only: false  # Enable trajectory tracking
-    use_gravity_compensation: false  # Zero gravity environment
+    use_gravity_compensation: true  # Enable Pinocchio (gravity torques will be zero in zero-g)
     compute_pd_internally: true  # Use software PD (loads gains from URDF)
 
 # Zordi Cartesian Controller
@@ -186,7 +186,7 @@ zordi_mit_rnea_controller:
 
     # RNEA mode with full inverse dynamics
     gravity_comp_only: false
-    use_gravity_compensation: false  # Zero gravity environment
+    use_gravity_compensation: true  # Enable Pinocchio (gravity torques will be zero in zero-g)
     compute_pd_internally: true  # Use software PD (loads gains from URDF)
 
 # Zordi MIT Gravity Controller (Pure gravity compensation, no trajectory tracking)
@@ -205,5 +205,5 @@ zordi_mit_gravity_controller:
 
     # Pure gravity compensation mode (fully backdrivable)
     gravity_comp_only: true
-    use_gravity_compensation: false  # Zero gravity environment
+    use_gravity_compensation: true  # Enable Pinocchio (gravity torques will be zero in zero-g)
     compute_pd_internally: false  # No PD needed in gravity comp only mode
