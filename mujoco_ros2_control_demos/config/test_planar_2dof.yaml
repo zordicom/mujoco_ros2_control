@@ -62,27 +62,27 @@ zordi_cartesian_controller:
     end_effector_frame: "ee_link"
     base_frame: "base_link"
 
-    # Cartesian stiffness (Moderate to overcome actuator biases)
+    # Cartesian stiffness (Moderate for stable tracking)
     stiffness:
       translation:
-        x: 500.0  # N/m (moderate to overcome actuator spring forces)
-        y: 500.0  # N/m (moderate to overcome actuator spring forces)
+        x: 200.0  # N/m (increased for better convergence)
+        y: 200.0  # N/m (increased for better convergence)
         z: 0.0     # Not used (planar XY)
       rotation:
         x: 0.0     # Not used (planar)
         y: 0.0     # Not used (planar)
-        z: 50.0   # Nm/rad (moderate for planar rotation)
+        z: 20.0   # Nm/rad (increased for better convergence)
 
     # Cartesian damping (auto-compute for critical damping)
     damping:
       translation:
-        x: 0.0  # Auto: 2*sqrt(500) ≈ 44.7
-        y: 0.0  # Auto: 2*sqrt(500) ≈ 44.7
+        x: 0.0  # Auto: 2*sqrt(200) ≈ 28.3
+        y: 0.0  # Auto: 2*sqrt(200) ≈ 28.3
         z: 0.0
       rotation:
         x: 0.0
         y: 0.0
-        z: 0.0  # Auto: 2*sqrt(50) ≈ 14.1
+        z: 0.0  # Auto: 2*sqrt(20) ≈ 8.9
 
     # Nullspace control (posture)
     nullspace:

@@ -136,9 +136,13 @@ Link 2: 0.5m long, 0.5kg, extends in +X direction
       <state_interface name="position"/>
       <state_interface name="velocity"/>
       <state_interface name="effort"/>
-      <!-- PID gains for MuJoCo MIT mode -->
+      <!-- Hardware PD gains for MuJoCo MIT mode (position/velocity actuators) -->
       <param name="position_kp">100.0</param>
       <param name="velocity_kp">10.0</param>
+      <!-- Software PD gains for Cartesian controller (when compute_pd_internally=true) -->
+      <!-- Reduced for zero-gravity testing with low Cartesian stiffness -->
+      <param name="kp">50.0</param>
+      <param name="kd">10.0</param>
     </joint>
 
     <joint name="joint2">
@@ -148,9 +152,13 @@ Link 2: 0.5m long, 0.5kg, extends in +X direction
       <state_interface name="position"/>
       <state_interface name="velocity"/>
       <state_interface name="effort"/>
-      <!-- PID gains for MuJoCo MIT mode -->
+      <!-- Hardware PD gains for MuJoCo MIT mode (position/velocity actuators) -->
       <param name="position_kp">50.0</param>
       <param name="velocity_kp">5.0</param>
+      <!-- Software PD gains for Cartesian controller (when compute_pd_internally=true) -->
+      <!-- Reduced for zero-gravity testing with low Cartesian stiffness -->
+      <param name="kp">25.0</param>
+      <param name="kd">5.0</param>
     </joint>
   </ros2_control>
 </robot>
