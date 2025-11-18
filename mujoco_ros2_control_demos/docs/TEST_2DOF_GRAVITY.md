@@ -437,11 +437,11 @@ ros2 service call /mujoco_ros2_control_node/simulation_control \
   mujoco_ros2_control_msgs/srv/SimulationControl "{command: 'unpause'}"
 
 # Pause simulation
-ros2 service call /mujoco_ros2_control_node/simulation_control \
+ros2 service call /simulation_control \
   mujoco_ros2_control_msgs/srv/SimulationControl "{command: 'pause'}"
 
 # Reset to initial keyframe
-ros2 service call /mujoco_ros2_control_node/reset_to_keyframe \
+ros2 service call /reset_to_keyframe \
   mujoco_ros2_control_msgs/srv/ResetToKeyframe "{keyframe_name: 'test_pose'}"
 ```
 
