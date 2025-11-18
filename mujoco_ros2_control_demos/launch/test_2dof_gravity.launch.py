@@ -175,31 +175,29 @@ def generate_launch_description():
         output="screen",
     )
 
-    return LaunchDescription(
-        [
-            mujoco_node,
-            robot_state_pub_node,
-            # Load controllers when mujoco node starts
-            # All 6 controllers loaded in inactive state - activate manually:
-            #   - zordi_grav_comp_controller: Pure gravity compensation
-            #   - zordi_joint_trajectory_controller: Joint space with gravity
-            #   - zordi_joint_rnea_controller: Joint space with RNEA
-            #   - zordi_cartesian_controller: Cartesian with gravity comp
-            #   - zordi_cartesian_rnea_controller: Cartesian with RNEA
-            #   - joint_trajectory_controller: ROS-native (no gravity comp)
-            RegisterEventHandler(
-                event_handler=OnProcessStart(
-                    target_action=mujoco_node,
-                    on_start=[
-                        load_joint_state_broadcaster,
-                        load_zordi_grav_comp_controller,
-                        load_zordi_joint_trajectory_controller,
-                        load_zordi_joint_rnea_controller,
-                        load_zordi_cartesian_controller,
-                        load_zordi_cartesian_rnea_controller,
-                        load_joint_trajectory_controller,
-                    ],
-                )
-            ),
-        ]
-    )
+    return LaunchDescription([
+        mujoco_node,
+        robot_state_pub_node,
+        # Load controllers when mujoco node starts
+        # All 6 controllers loaded in inactive state - activate manually:
+        #   - zordi_grav_comp_controller: Pure gravity compensation
+        #   - zordi_joint_trajectory_controller: Joint space with gravity
+        #   - zordi_joint_rnea_controller: Joint space with RNEA
+        #   - zordi_cartesian_controller: Cartesian with gravity comp
+        #   - zordi_cartesian_rnea_controller: Cartesian with RNEA
+        #   - joint_trajectory_controller: ROS-native (no gravity comp)
+        RegisterEventHandler(
+            event_handler=OnProcessStart(
+                target_action=mujoco_node,
+                on_start=[
+                    load_joint_state_broadcaster,
+                    load_zordi_grav_comp_controller,
+                    load_zordi_joint_trajectory_controller,
+                    load_zordi_joint_rnea_controller,
+                    load_zordi_cartesian_controller,
+                    load_zordi_cartesian_rnea_controller,
+                    load_joint_trajectory_controller,
+                ],
+            )
+        ),
+    ])

@@ -129,4 +129,3 @@ Gravity compensation allows the robot to hold any configuration and track trajec
     </joint>
   </ros2_control>
 </robot>
-
