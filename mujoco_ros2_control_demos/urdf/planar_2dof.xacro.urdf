@@ -13,7 +13,7 @@ Link 2: 0.5m long, 0.5kg, extends in +X direction
 <robot name="cartpole_2dof">
   <!-- Base link (fixed to world) -->
   <link name="world"/>
-  
+
   <link name="base_link">
     <visual>
       <geometry>
@@ -162,4 +162,3 @@ Link 2: 0.5m long, 0.5kg, extends in +X direction
     </joint>
   </ros2_control>
 </robot>
-
