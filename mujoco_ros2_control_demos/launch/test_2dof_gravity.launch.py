@@ -48,8 +48,7 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess, RegisterEventHandler
-from launch.conditions import IfCondition
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, RegisterEventHandler, TimerAction
 from launch.event_handlers import OnProcessStart
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -78,22 +77,8 @@ def generate_launch_description():
         output="screen",
     )
 
-    # Optional MuJoCo viewer (separate process)
-    viewer_node = Node(
-        package="mujoco_ros2_control",
-        executable="mujoco_viewer",
-        name="mujoco_viewer",
-        parameters=[
-            {
-                "mujoco_model_path": str(mujoco_model),
-                "service_namespace": "/mujoco_system",
-            }
-        ],
-        condition=IfCondition(LaunchConfiguration("show_viewer")),
-        output="screen",
-    )
-
     # Robot state publisher (needed for controller to fetch robot_description)
+    # Note: Viewer is now integrated into MujocoSystem plugin - enable via URDF parameter
     robot_state_pub_node = Node(
         package="robot_state_publisher",
         executable="robot_state_publisher",
@@ -101,88 +86,54 @@ def generate_launch_description():
         output="screen",
     )
 
-    # Load controllers using ros2 control CLI (standard mujoco_ros2_control pattern)
-    load_joint_state_broadcaster = ExecuteProcess(
-        cmd=[
-            "ros2",
-            "control",
-            "load_controller",
-            "--set-state",
-            "active",
-            "joint_state_broadcaster",
-        ],
+    # Load controllers using spawner (more robust than ros2 control CLI)
+    # Spawner automatically waits for controller_manager services to be ready
+    load_joint_state_broadcaster = Node(
+        package="controller_manager",
+        executable="spawner",
+        arguments=["joint_state_broadcaster", "-c", "/controller_manager"],
         output="screen",
     )
 
-    load_zordi_grav_comp_controller = ExecuteProcess(
-        cmd=[
-            "ros2",
-            "control",
-            "load_controller",
-            "--set-state",
-            "inactive",
-            "zordi_grav_comp_controller",
-        ],
+    load_zordi_grav_comp_controller = Node(
+        package="controller_manager",
+        executable="spawner",
+        arguments=["zordi_grav_comp_controller", "-c", "/controller_manager", "--inactive"],
         output="screen",
     )
 
-    load_zordi_joint_trajectory_controller = ExecuteProcess(
-        cmd=[
-            "ros2",
-            "control",
-            "load_controller",
-            "--set-state",
-            "inactive",
-            "zordi_joint_trajectory_controller",
-        ],
+    load_zordi_joint_trajectory_controller = Node(
+        package="controller_manager",
+        executable="spawner",
+        arguments=["zordi_joint_trajectory_controller", "-c", "/controller_manager", "--inactive"],
         output="screen",
     )
 
-    load_zordi_joint_rnea_controller = ExecuteProcess(
-        cmd=[
-            "ros2",
-            "control",
-            "load_controller",
-            "--set-state",
-            "inactive",
-            "zordi_joint_rnea_controller",
-        ],
+    load_zordi_joint_rnea_controller = Node(
+        package="controller_manager",
+        executable="spawner",
+        arguments=["zordi_joint_rnea_controller", "-c", "/controller_manager", "--inactive"],
         output="screen",
     )
 
-    load_zordi_cartesian_controller = ExecuteProcess(
-        cmd=[
-            "ros2",
-            "control",
-            "load_controller",
-            "--set-state",
-            "inactive",
-            "zordi_cartesian_controller",
-        ],
+    load_zordi_cartesian_controller = Node(
+        package="controller_manager",
+        executable="spawner",
+        arguments=["zordi_cartesian_controller", "-c", "/controller_manager", "--inactive"],
         output="screen",
     )
 
-    load_zordi_cartesian_rnea_controller = ExecuteProcess(
-        cmd=[
-            "ros2",
-            "control",
-            "load_controller",
-            "--set-state",
-            "inactive",
-            "zordi_cartesian_rnea_controller",
-        ],
+    load_zordi_cartesian_rnea_controller = Node(
+        package="controller_manager",
+        executable="spawner",
+        arguments=["zordi_cartesian_rnea_controller", "-c", "/controller_manager", "--inactive"],
         output="screen",
     )
 
-    load_joint_trajectory_controller = ExecuteProcess(
-        cmd=[
-            "ros2",
-            "control",
-            "load_controller",
-            "--set-state",
-            "inactive",
-            "joint_trajectory_controller",
-        ],
+    load_joint_trajectory_controller = Node(
+        package="controller_manager",
+        executable="spawner",
+        arguments=["joint_trajectory_controller", "-c", "/controller_manager", "--inactive"],
         output="screen",
     )
 
@@ -200,15 +151,16 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        # Launch argument for viewer (DISABLED - viewer is non-functional)
+        # Launch argument for viewer (integrated into MujocoSystem plugin via URDF parameter)
+        # Note: Viewer is now enabled/disabled via URDF <param name="enable_viewer">true/false</param>
+        # This launch argument is kept for backward compatibility but has no effect
         DeclareLaunchArgument(
             "show_viewer",
             default_value="false",
-            description="Launch MuJoCo interactive viewer (CURRENTLY NON-FUNCTIONAL - use RViz instead)",
+            description="[DEPRECATED] Viewer is now controlled via URDF parameter 'enable_viewer'",
         ),
         controller_manager_node,
         robot_state_pub_node,
-        viewer_node,
         # Load controllers when controller_manager starts
         # All 6 controllers loaded in inactive state - activate manually:
         #   - zordi_grav_comp_controller: Pure gravity compensation
@@ -217,18 +169,23 @@ def generate_launch_description():
         #   - zordi_cartesian_controller: Cartesian with gravity comp
         #   - zordi_cartesian_rnea_controller: Cartesian with RNEA
         #   - joint_trajectory_controller: ROS-native (no gravity comp)
+        # Using spawner nodes - they automatically wait for controller_manager to be ready
+        load_joint_state_broadcaster,
+        load_zordi_grav_comp_controller,
+        load_zordi_joint_trajectory_controller,
+        load_zordi_joint_rnea_controller,
+        load_zordi_cartesian_controller,
+        load_zordi_cartesian_rnea_controller,
+        load_joint_trajectory_controller,
+        # Reset to test_pose after controllers load (with small delay)
         RegisterEventHandler(
             event_handler=OnProcessStart(
-                target_action=controller_manager_node,
+                target_action=load_joint_state_broadcaster,
                 on_start=[
-                    load_joint_state_broadcaster,
-                    load_zordi_grav_comp_controller,
-                    load_zordi_joint_trajectory_controller,
-                    load_zordi_joint_rnea_controller,
-                    load_zordi_cartesian_controller,
-                    load_zordi_cartesian_rnea_controller,
-                    load_joint_trajectory_controller,
-                    reset_to_test_pose,
+                    TimerAction(
+                        period=1.0,
+                        actions=[reset_to_test_pose],
+                    )
                 ],
             )
         ),

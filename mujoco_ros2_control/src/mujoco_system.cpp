@@ -183,7 +183,7 @@ CallbackReturn MujocoSystem::on_configure(const rclcpp_lifecycle::State& /* prev
   // Initialize viewer if enabled (AFTER simple node creation - old working pattern)
   if (enable_viewer_) {
     RCLCPP_INFO(logger_, "Starting interactive viewer thread...");
-    
+
     // Start viewer thread - do ALL GLFW/OpenGL init inside thread for proper context handling
     stop_viewer_ = false;
     viewer_thread_ = std::thread([this]() {
@@ -192,25 +192,25 @@ CallbackReturn MujocoSystem::on_configure(const rclcpp_lifecycle::State& /* prev
         RCLCPP_ERROR(logger_, "Failed to initialize GLFW in viewer thread");
         return;
       }
-      
+
       // Create window and initialize rendering (all on same thread as rendering)
       rendering_ = mujoco_ros2_control::MujocoRendering::get_instance();
       rendering_->init(mj_model_, mj_data_);
-      
+
       RCLCPP_INFO(logger_, "Viewer thread started - rendering at 60 Hz");
       RCLCPP_INFO(logger_, "  Mouse: Camera controls | Close window to stop");
-      
+
       // Rendering loop
       while (!stop_viewer_ && !rendering_->is_close_flag_raised()) {
         rendering_->update();
         glfwPollEvents();  // Process window events
         std::this_thread::sleep_for(std::chrono::milliseconds(16)); // ~60 Hz
       }
-      
+
       RCLCPP_INFO(logger_, "Viewer thread stopped");
       glfwTerminate();
     });
-    
+
     RCLCPP_INFO(logger_, "MuJoCo interactive viewer enabled (background thread)");
   }
 
