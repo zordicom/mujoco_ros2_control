@@ -119,9 +119,5 @@ install(TARGETS
   RUNTIME DESTINATION bin
 )
 
-# Install launch files
-install(DIRECTORY launch
-  DESTINATION share/${PROJECT_NAME}/)
-
 pluginlib_export_plugin_description_file(hardware_interface mujoco_system_plugins.xml)
 ament_package()
