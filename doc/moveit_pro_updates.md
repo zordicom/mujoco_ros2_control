@@ -4,7 +4,22 @@
 
 This document describes the enhancements made to `mujoco_ros2_control` to enable it as a drop-in replacement for `picknik_mujoco_ros/MujocoSystem` in MoveIt Pro workspaces.
 
-> **⚠️ Known Issue:** The separate `mujoco_viewer` executable mentioned in this document is currently non-functional due to an incompatibility between `rclcpp::Node` and `mujoco_rendering` libraries introduced during the refactor. For visualization, use **RViz** with the `/joint_states` topic. The core simulation and control functionality is fully operational.
+## Visualization Options
+
+**Option 1: RViz (Recommended for MoveIt Pro)**
+- No additional configuration needed
+- Visualize via `/joint_states` topic
+- Works with any robot model
+
+**Option 2: Interactive MuJoCo Viewer (Optional)**
+- Enable with parameter: `mujoco_system.enable_viewer:=true`
+- Provides interactive 3D visualization with mouse camera controls
+- Runs in background thread, no impact when disabled
+- Example:
+  ```bash
+  ros2 launch my_package demo.launch.py \
+    mujoco_system.enable_viewer:=true
+  ```
 
 ## Motivation
 

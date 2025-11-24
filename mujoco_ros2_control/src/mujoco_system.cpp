@@ -28,6 +28,10 @@
 // For package path resolution
 #include <ament_index_cpp/get_package_share_directory.hpp>
 
+// For optional viewer
+#include "mujoco_ros2_control/mujoco_rendering.hpp"
+#include "GLFW/glfw3.h"
+
 namespace mujoco_ros2_control
 {
 MujocoSystem::MujocoSystem() : logger_(rclcpp::get_logger("")) {}
@@ -104,6 +108,9 @@ void MujocoSystem::create_services_and_publishers() {
   if (!node_) {
     node_ = rclcpp::Node::make_shared("mujoco_system");
     node_->set_parameter(rclcpp::Parameter("use_sim_time", false));  // We ARE sim time
+    
+    // Declare viewer parameter (default false - no impact on MoveIt Pro)
+    enable_viewer_ = node_->declare_parameter("enable_viewer", false);
   }
 
   // Clock publisher
@@ -169,6 +176,35 @@ CallbackReturn MujocoSystem::on_configure(const rclcpp_lifecycle::State& /* prev
     RCLCPP_INFO(logger_, "Cameras initialized: publishing every %d steps", camera_interval_);
   }
 
+  // Initialize viewer if enabled (AFTER simple node creation - old working pattern)
+  if (enable_viewer_) {
+    RCLCPP_INFO(logger_, "Initializing interactive viewer...");
+    
+    // Initialize GLFW (following old working pattern)
+    if (!glfwInit()) {
+      RCLCPP_ERROR(logger_, "Failed to initialize GLFW - viewer disabled");
+      enable_viewer_ = false;
+    } else {
+      rendering_ = mujoco_ros2_control::MujocoRendering::get_instance();
+      rendering_->init(mj_model_, mj_data_);
+      
+      // Start viewer thread at 60 Hz
+      stop_viewer_ = false;
+      viewer_thread_ = std::thread([this]() {
+        RCLCPP_INFO(logger_, "Viewer thread started (60 Hz rendering)");
+        while (!stop_viewer_ && !rendering_->is_close_flag_raised()) {
+          rendering_->update();
+          std::this_thread::sleep_for(std::chrono::milliseconds(16)); // ~60 Hz
+        }
+        RCLCPP_INFO(logger_, "Viewer thread stopped");
+      });
+      
+      RCLCPP_INFO(logger_, "MuJoCo interactive viewer enabled");
+      RCLCPP_INFO(logger_, "  Mouse: Camera controls");
+      RCLCPP_INFO(logger_, "  Close window to disable viewer");
+    }
+  }
+
   RCLCPP_INFO(logger_, "MujocoSystem configured successfully");
 
   return CallbackReturn::SUCCESS;
@@ -205,6 +241,16 @@ CallbackReturn MujocoSystem::on_deactivate(const rclcpp_lifecycle::State& /* pre
 
 CallbackReturn MujocoSystem::on_cleanup(const rclcpp_lifecycle::State& /* prev */) {
   RCLCPP_INFO(logger_, "Cleaning up MujocoSystem...");
+
+  // Stop viewer thread if running
+  if (viewer_thread_.joinable()) {
+    stop_viewer_ = true;
+    if (rendering_) {
+      rendering_->close();
+    }
+    viewer_thread_.join();
+    RCLCPP_INFO(logger_, "Viewer thread stopped");
+  }
 
   // Stop executor thread
   if (executor_) {

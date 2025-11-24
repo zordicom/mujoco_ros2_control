@@ -46,6 +46,8 @@
 
 namespace mujoco_ros2_control
 {
+// Forward declaration for optional viewer
+class MujocoRendering;
 constexpr char PARAM_KP[]{"_kp"};
 constexpr char PARAM_KI[]{"_ki"};
 constexpr char PARAM_KD[]{"_kd"};
@@ -196,6 +198,12 @@ private:
   rclcpp::Node::SharedPtr node_;  // For services and publishers
   rclcpp::executors::SingleThreadedExecutor::SharedPtr executor_;
   std::thread executor_thread_;
+
+  // Viewer (optional)
+  bool enable_viewer_{false};
+  mujoco_ros2_control::MujocoRendering* rendering_{nullptr};
+  std::thread viewer_thread_;
+  std::atomic<bool> stop_viewer_{false};
 
   // Clock publishing
   rclcpp::Publisher<rosgraph_msgs::msg::Clock>::SharedPtr clock_publisher_;
