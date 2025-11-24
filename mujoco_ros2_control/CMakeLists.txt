@@ -118,20 +118,25 @@ install(TARGETS
   RUNTIME DESTINATION bin
 )
 
-# Viewer executable
-add_executable(mujoco_viewer src/mujoco_viewer_node.cpp)
-ament_target_dependencies(mujoco_viewer ${THIS_PACKAGE_DEPENDS})
-target_link_libraries(mujoco_viewer ${MUJOCO_LIB} mujoco_rendering glfw)
-target_include_directories(mujoco_viewer
-  PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>
-    ${MUJOCO_INCLUDE_DIR}
-    ${EIGEN3_INCLUDE_DIR})
-
-install(TARGETS
-  mujoco_viewer
-  DESTINATION lib/${PROJECT_NAME})
+# Viewer executable - DISABLED (not functional after refactor)
+# The separate mujoco_viewer executable has a fundamental incompatibility
+# between rclcpp::Node and mujoco_rendering that causes crashes.
+# For visualization, use RViz with /joint_states topic.
+# See: https://github.com/PickNikRobotics/mujoco_ros2_control/issues/XXX
+#
+# add_executable(mujoco_viewer src/mujoco_viewer_node.cpp)
+# ament_target_dependencies(mujoco_viewer ${THIS_PACKAGE_DEPENDS})
+# target_link_libraries(mujoco_viewer ${MUJOCO_LIB} mujoco_rendering glfw)
+# target_include_directories(mujoco_viewer
+#   PUBLIC
+#     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+#     $<INSTALL_INTERFACE:include>
+#     ${MUJOCO_INCLUDE_DIR}
+#     ${EIGEN3_INCLUDE_DIR})
+#
+# install(TARGETS
+#   mujoco_viewer
+#   DESTINATION lib/${PROJECT_NAME})
 
 # Install launch files
 install(DIRECTORY launch

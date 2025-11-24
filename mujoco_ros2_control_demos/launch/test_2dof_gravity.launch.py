@@ -200,11 +200,11 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        # Launch argument for viewer
+        # Launch argument for viewer (DISABLED - viewer is non-functional)
         DeclareLaunchArgument(
             "show_viewer",
-            default_value="true",
-            description="Launch MuJoCo interactive viewer (default: true)",
+            default_value="false",
+            description="Launch MuJoCo interactive viewer (CURRENTLY NON-FUNCTIONAL - use RViz instead)",
         ),
         controller_manager_node,
         robot_state_pub_node,

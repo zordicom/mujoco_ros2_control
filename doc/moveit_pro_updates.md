@@ -4,6 +4,8 @@
 
 This document describes the enhancements made to `mujoco_ros2_control` to enable it as a drop-in replacement for `picknik_mujoco_ros/MujocoSystem` in MoveIt Pro workspaces.
 
+> **⚠️ Known Issue:** The separate `mujoco_viewer` executable mentioned in this document is currently non-functional due to an incompatibility between `rclcpp::Node` and `mujoco_rendering` libraries introduced during the refactor. For visualization, use **RViz** with the `/joint_states` topic. The core simulation and control functionality is fully operational.
+
 ## Motivation
 
 The original `mujoco_ros2_control` plugin was designed exclusively for standalone node operation (Mode 2), where a separate `mujoco_ros2_control` executable handles simulation stepping, clock publishing, and services. This architecture is incompatible with MoveIt Pro, which expects hardware interfaces to be loaded directly by `controller_manager` with full lifecycle support.
