@@ -13,11 +13,11 @@ The `test_2dof_gravity` example features a vertical double pendulum where q=[0, 
 This demo uses the unified lifecycle architecture:
 
 - **Simulation:** MujocoSystem plugin loaded by controller_manager
-- **Visualization:** Optional mujoco_viewer (separate process, standard MuJoCo GLFW interface)
+- **Visualization:** Integrated MuJoCo viewer (enabled via URDF `enable_viewer` parameter)
 - **Control:** Plugin steps simulation in `write()` method (1000 Hz)
-- **Services:** Accessible to both viewer and external tools at `/mujoco_system/*`
+- **Services:** Accessible at `/mujoco_system/*`
 
-The plugin owns the MuJoCo model and simulation. The viewer (if launched) only displays joint states - it does not run simulation.
+The plugin owns the MuJoCo model and simulation. The integrated viewer runs in a background thread at 60 Hz.
 
 ### System Specifications
 
@@ -80,7 +80,7 @@ ros2 launch mujoco_ros2_control_demos test_2dof_gravity.launch.py
 This launches:
 
 - Controller manager with MujocoSystem plugin (lifecycle mode)
-- MuJoCo interactive viewer (optional, visualization only)
+- Integrated MuJoCo viewer (enabled by default via URDF parameter)
 - 2-DOF vertical double pendulum
 - Robot state publisher
 - Joint state broadcaster (active)
@@ -94,15 +94,14 @@ This launches:
 
 **Note:** The robot is reset to `test_pose` (q=[0.3, -0.2]) after launch via service call. This provides a configuration with some gravity torque to verify compensation is working.
 
-**Launch Arguments:**
+**Important:** Simulation starts **PAUSED**. You must unpause after activating controllers:
 
 ```bash
-# With viewer (default)
-ros2 launch mujoco_ros2_control_demos test_2dof_gravity.launch.py
-
-# Without viewer
-ros2 launch mujoco_ros2_control_demos test_2dof_gravity.launch.py show_viewer:=false
+ros2 service call /mujoco_system/simulation_control \
+  mujoco_ros2_control_msgs/srv/SimulationControl "{command: 'unpause'}"
 ```
+
+**Viewer Control:** The viewer is enabled/disabled via URDF parameter `enable_viewer` (default: true for this demo). To disable, edit `test_2dof_gravity.xacro.urdf`.
 
 **Available keyframes** (defined in MuJoCo XML, loaded via service):
 
@@ -129,11 +128,13 @@ Keyframe options:
 ros2 control list_controllers
 
 # Expected output:
-#   joint_state_broadcaster  [active]
-#   zordi_mit_controller     [inactive]
-#   zordi_mit_rnea_controller [inactive]
-#   zordi_cartesian_controller [inactive]
-#   zordi_cartesian_rnea_controller [inactive]
+#   joint_state_broadcaster            [active]
+#   zordi_grav_comp_controller         [inactive]
+#   zordi_joint_trajectory_controller  [inactive]
+#   zordi_joint_rnea_controller        [inactive]
+#   zordi_cartesian_controller         [inactive]
+#   zordi_cartesian_rnea_controller    [inactive]
+#   joint_trajectory_controller        [inactive]
 
 # Monitor joint states
 ros2 topic echo /joint_states
@@ -153,12 +154,17 @@ ros2 topic echo /joint_states
 ros2 control set_controller_state zordi_grav_comp_controller active
 ```
 
-2. **Observe behavior:**
+2. **Unpause simulation:**
+
+```bash
+ros2 service call /mujoco_system/simulation_control \
+  mujoco_ros2_control_msgs/srv/SimulationControl "{command: 'unpause'}"
+```
+
+3. **Observe behavior:**
    - Robot should hold position at q=[0.3, -0.2]
    - Robot should be backdrivable (you can push it in simulation)
    - No trajectory tracking active - purely gravity compensation
-
-**Note:** Simulation starts in RUNNING state (no need to unpause).
 
 **Success Criteria:**
 

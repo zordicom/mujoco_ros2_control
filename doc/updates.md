@@ -100,6 +100,7 @@ Enable in URDF hardware parameters:
 ```
 
 **Viewer features:**
+
 - Standard MuJoCo interactive viewer with mouse camera controls
 - Runs in background thread at 60 Hz
 - No impact on simulation when disabled (default)
@@ -153,10 +154,10 @@ For each joint interface declared in URDF, a corresponding actuator must exist i
   <actuator>
     <!-- Position actuator for joint1 -->
     <position name="act_pos_joint1" joint="joint1" kp="100" kv="0"/>
-    
+
     <!-- Velocity actuator for joint1 -->
     <velocity name="act_vel_joint1" joint="joint1" kv="10"/>
-    
+
     <!-- Torque actuator for joint1 -->
     <motor name="act_tau_joint1" joint="joint1" gear="1"/>
   </actuator>
@@ -270,7 +271,7 @@ publish_clock();                 // Publish /clock
 
 1. **read()**: Copy joint states from `mj_data->qpos`, `qvel`, `qfrc_actuator`
 2. **Controller update**: ros2_control updates controllers
-3. **write()**: 
+3. **write()**:
    - Check for pending resets
    - Handle pause state
    - Apply commands to actuators via `mj_data->ctrl`
@@ -281,6 +282,7 @@ publish_clock();                 // Publish /clock
 ### Thread Safety
 
 All shared state is protected by mutexes:
+
 - `sim_state_mutex_` - Pause/unpause state
 - `wrench_mutex_` - External wrench data
 - `reset_mutex_` - Pending keyframe reset
@@ -290,6 +292,7 @@ The executor runs in a separate thread for service callbacks.
 ### Paused State Behavior
 
 When PAUSED:
+
 - Physics steps skipped (`mj_step1/step2` not called)
 - Simulation time frozen
 - Controllers remain active with `period=0`
@@ -302,6 +305,7 @@ When PAUSED:
 ### From picknik_mujoco_ros
 
 **Before:**
+
 ```xml
 <plugin>picknik_mujoco_ros/MujocoSystem</plugin>
 <param name="mujoco_model">${mujoco_model}</param>
@@ -310,6 +314,7 @@ When PAUSED:
 ```
 
 **After:**
+
 ```xml
 <plugin>mujoco_ros2_control/MujocoSystem</plugin>
 <param name="mujoco_model">${mujoco_model}</param>
@@ -320,12 +325,14 @@ When PAUSED:
 ### From Old mujoco_ros2_control (Mode 2)
 
 **Old workflow (DEPRECATED):**
+
 ```bash
 ros2 run mujoco_ros2_control mujoco_ros2_control_node \
   --ros-args -p mujoco_model_path:=/path/to/model.xml
 ```
 
 **New workflow:**
+
 ```bash
 ros2 run controller_manager ros2_control_node \
   --ros-args -p robot_description:="$(cat robot.urdf)"
@@ -334,11 +341,13 @@ ros2 run controller_manager ros2_control_node \
 ### MuJoCo Model Updates Required
 
 **Old naming (no longer supported):**
+
 ```xml
 <actuator name="actuator_joint1" joint="joint1"/>
 ```
 
 **New naming (required):**
+
 ```xml
 <position name="act_pos_joint1" joint="joint1" kp="100" kv="0"/>
 <velocity name="act_vel_joint1" joint="joint1" kv="10"/>
@@ -402,6 +411,7 @@ Controllers are loaded automatically via spawner. Simulation starts PAUSED.
 ### 2025-11-24: Unified Architecture
 
 **Major Changes:**
+
 - Removed Mode 2 (standalone node) - plugin-only architecture
 - Integrated viewer into plugin (via URDF parameter)
 - Fixed controller loading timing with spawner
@@ -409,6 +419,7 @@ Controllers are loaded automatically via spawner. Simulation starts PAUSED.
 - Removed separate `mujoco_viewer` executable
 
 **Files Changed:**
+
 - `mujoco_system.cpp` - Added integrated viewer support
 - `CMakeLists.txt` - Linked GLFW to plugin, removed viewer executable
 - Launch files - Updated to use spawner for controller loading
@@ -417,6 +428,7 @@ Controllers are loaded automatically via spawner. Simulation starts PAUSED.
 ### 2025-11: Actuator-Centric Control
 
 **Features Added:**
+
 - Per-joint, per-actuator control routing
 - Dynamic interface activation tracking
 - MIT mode with automatic detection
@@ -432,12 +444,11 @@ Controllers are loaded automatically via spawner. Simulation starts PAUSED.
 
 ## References
 
-- Original mujoco_ros2_control: https://github.com/sangteak601/mujoco_ros2_control
-- MoveIt Pro documentation: https://moveit.picknik.ai/
-- ros2_control documentation: https://control.ros.org/
-- MuJoCo documentation: https://mujoco.readthedocs.io/
+- Original mujoco_ros2_control: <https://github.com/sangteak601/mujoco_ros2_control>
+- MoveIt Pro documentation: <https://moveit.picknik.ai/>
+- ros2_control documentation: <https://control.ros.org/>
+- MuJoCo documentation: <https://mujoco.readthedocs.io/>
 
 ---
 
 **Copyright 2025 Zordi, Inc. All rights reserved.**
-
