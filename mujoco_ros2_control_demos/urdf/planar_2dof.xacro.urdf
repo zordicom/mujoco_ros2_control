@@ -129,6 +129,8 @@ Link 2: 0.5m long, 0.5kg, extends in +X direction
       <plugin>mujoco_ros2_control/MujocoSystem</plugin>
       <param name="mujoco_model">mujoco_models/planar_2dof.xml</param>
       <param name="mujoco_model_package">mujoco_ros2_control_demos</param>
+      <!-- Optional: enable interactive MuJoCo viewer (default: false) -->
+      <!-- <param name="enable_viewer">true</param> -->
     </hardware>
 
     <joint name="joint1">

@@ -72,9 +72,21 @@ else()
   Either build and install mujoco from source or set the MUJOCO_DIR environment variable to tell CMake where to find the binary install. ")
 endif()
 
+# Build rendering and cameras as libraries (needed by mujoco_system_plugins for optional viewer)
+add_library(mujoco_rendering SHARED src/mujoco_rendering.cpp)
+ament_target_dependencies(mujoco_rendering ${THIS_PACKAGE_DEPENDS})
+target_link_libraries(mujoco_rendering ${MUJOCO_LIB} glfw)
+target_include_directories(mujoco_rendering
+  PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+    ${MUJOCO_INCLUDE_DIR}
+    ${EIGEN3_INCLUDE_DIR})
+
+# Build mujoco_system plugin (links with mujoco_rendering for optional viewer)
 add_library(mujoco_system_plugins SHARED src/mujoco_system.cpp)
 ament_target_dependencies(mujoco_system_plugins ${THIS_PACKAGE_DEPENDS})
-target_link_libraries(mujoco_system_plugins ${MUJOCO_LIB})
+target_link_libraries(mujoco_system_plugins ${MUJOCO_LIB} mujoco_rendering glfw)
 target_include_directories(mujoco_system_plugins
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -88,17 +100,6 @@ install(TARGETS
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
 )
-
-# Build rendering and cameras as libraries for viewer to use
-add_library(mujoco_rendering SHARED src/mujoco_rendering.cpp)
-ament_target_dependencies(mujoco_rendering ${THIS_PACKAGE_DEPENDS})
-target_link_libraries(mujoco_rendering ${MUJOCO_LIB} glfw)
-target_include_directories(mujoco_rendering
-  PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>
-    ${MUJOCO_INCLUDE_DIR}
-    ${EIGEN3_INCLUDE_DIR})
 
 add_library(mujoco_cameras SHARED src/mujoco_cameras.cpp)
 ament_target_dependencies(mujoco_cameras ${THIS_PACKAGE_DEPENDS})

@@ -75,6 +75,13 @@ CallbackReturn MujocoSystem::on_init(const hardware_interface::HardwareInfo& inf
     RCLCPP_INFO(logger_, "Cameras enabled (%.1f Hz)", camera_publish_rate_);
   }
 
+  // Viewer configuration
+  auto viewer_it = info_.hardware_parameters.find("enable_viewer");
+  if (viewer_it != info_.hardware_parameters.end() && viewer_it->second == "true") {
+    enable_viewer_ = true;
+    RCLCPP_INFO(logger_, "Interactive viewer will be enabled in on_configure()");
+  }
+
   // Load MuJoCo model (needed for joint registration before export_*_interfaces())
   char error[1000];
   mj_model_ = mj_loadXML(mujoco_model_path_.c_str(), 0, error, 1000);
@@ -108,9 +115,6 @@ void MujocoSystem::create_services_and_publishers() {
   if (!node_) {
     node_ = rclcpp::Node::make_shared("mujoco_system");
     node_->set_parameter(rclcpp::Parameter("use_sim_time", false));  // We ARE sim time
-    
-    // Declare viewer parameter (default false - no impact on MoveIt Pro)
-    enable_viewer_ = node_->declare_parameter("enable_viewer", false);
   }
 
   // Clock publisher
@@ -179,7 +183,7 @@ CallbackReturn MujocoSystem::on_configure(const rclcpp_lifecycle::State& /* prev
   // Initialize viewer if enabled (AFTER simple node creation - old working pattern)
   if (enable_viewer_) {
     RCLCPP_INFO(logger_, "Initializing interactive viewer...");
-    
+
     // Initialize GLFW (following old working pattern)
     if (!glfwInit()) {
       RCLCPP_ERROR(logger_, "Failed to initialize GLFW - viewer disabled");
@@ -187,7 +191,7 @@ CallbackReturn MujocoSystem::on_configure(const rclcpp_lifecycle::State& /* prev
     } else {
       rendering_ = mujoco_ros2_control::MujocoRendering::get_instance();
       rendering_->init(mj_model_, mj_data_);
-      
+
       // Start viewer thread at 60 Hz
       stop_viewer_ = false;
       viewer_thread_ = std::thread([this]() {
@@ -198,7 +202,7 @@ CallbackReturn MujocoSystem::on_configure(const rclcpp_lifecycle::State& /* prev
         }
         RCLCPP_INFO(logger_, "Viewer thread stopped");
       });
-      
+
       RCLCPP_INFO(logger_, "MuJoCo interactive viewer enabled");
       RCLCPP_INFO(logger_, "  Mouse: Camera controls");
       RCLCPP_INFO(logger_, "  Close window to disable viewer");
