@@ -24,11 +24,22 @@
 #include <Eigen/Dense>
 #include <string>
 #include <vector>
+#include <thread>
+#include <mutex>
 
 #include "control_toolbox/pid.hpp"
 #include "hardware_interface/types/hardware_interface_type_values.hpp"
 #include "joint_limits/joint_limits.hpp"
 #include "mujoco_ros2_control/mujoco_system_interface.hpp"
+
+// Service messages
+#include "mujoco_ros2_control_msgs/srv/reset_to_keyframe.hpp"
+#include "mujoco_ros2_control_msgs/srv/simulation_control.hpp"
+#include "mujoco_ros2_control_msgs/srv/apply_external_wrench.hpp"
+
+// ROS messages
+#include "rosgraph_msgs/msg/clock.hpp"
+#include "std_msgs/msg/float64_multi_array.hpp"
 
 namespace mujoco_ros2_control
 {
@@ -42,6 +53,14 @@ class MujocoSystem : public MujocoSystemInterface
 {
 public:
   MujocoSystem();
+
+  // Lifecycle methods
+  CallbackReturn on_init(const hardware_interface::HardwareInfo& info) override;
+  CallbackReturn on_configure(const rclcpp_lifecycle::State& previous_state) override;
+  CallbackReturn on_activate(const rclcpp_lifecycle::State& previous_state) override;
+  CallbackReturn on_deactivate(const rclcpp_lifecycle::State& previous_state) override;
+  CallbackReturn on_cleanup(const rclcpp_lifecycle::State& previous_state) override;
+
   std::vector<hardware_interface::StateInterface> export_state_interfaces() override;
   std::vector<hardware_interface::CommandInterface> export_command_interfaces() override;
 
@@ -144,6 +163,19 @@ private:
     const hardware_interface::ComponentInfo &joint_info, std::string command_interface);
   double clamp(double v, double lo, double hi) { return (v < lo) ? lo : (hi < v) ? hi : v; }
 
+  // Service handlers (NEW - adapted from MujocoRos2Control)
+  void handle_reset_to_keyframe(
+    const std::shared_ptr<mujoco_ros2_control_msgs::srv::ResetToKeyframe::Request> req,
+    std::shared_ptr<mujoco_ros2_control_msgs::srv::ResetToKeyframe::Response> res);
+
+  void handle_simulation_control(
+    const std::shared_ptr<mujoco_ros2_control_msgs::srv::SimulationControl::Request> req,
+    std::shared_ptr<mujoco_ros2_control_msgs::srv::SimulationControl::Response> res);
+
+  void handle_apply_external_wrench(
+    const std::shared_ptr<mujoco_ros2_control_msgs::srv::ApplyExternalWrench::Request> req,
+    std::shared_ptr<mujoco_ros2_control_msgs::srv::ApplyExternalWrench::Response> res);
+
   std::vector<hardware_interface::StateInterface> state_interfaces_;
   std::vector<hardware_interface::CommandInterface> command_interfaces_;
 
@@ -154,15 +186,52 @@ private:
   mjModel *mj_model_;
   mjData *mj_data_;
 
-  rclcpp::Logger logger_;  // TODO(sangteak601): delete?
+  rclcpp::Logger logger_;
 
-  // Control mode (deprecated - kept for backward compatibility)
-  // Use current_motor_mode_ for actual mode selection
+  // Mode tracking
+  bool lifecycle_mode_{false};
+  bool owns_mujoco_model_{false};
+  std::string mujoco_model_path_;
 
-  // Current motor mode: dynamically switched based on active controller
-  // "mit" - Full MIT mode (default, matches real hardware)
-  // "position" - Position servo mode (MuJoCo actuators)
-  // "effort" - Pure torque mode
+  // ROS infrastructure (for lifecycle mode)
+  rclcpp::Node::SharedPtr node_;  // For services and publishers
+  rclcpp::executors::SingleThreadedExecutor::SharedPtr executor_;
+  std::thread executor_thread_;
+
+  // Clock publishing
+  rclcpp::Publisher<rosgraph_msgs::msg::Clock>::SharedPtr clock_publisher_;
+
+  // Diagnostic publishing
+  rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr qfrc_bias_publisher_;
+
+  // Services (NEW - from MujocoRos2Control)
+  rclcpp::Service<mujoco_ros2_control_msgs::srv::ResetToKeyframe>::SharedPtr reset_service_;
+  rclcpp::Service<mujoco_ros2_control_msgs::srv::SimulationControl>::SharedPtr sim_control_service_;
+  rclcpp::Service<mujoco_ros2_control_msgs::srv::ApplyExternalWrench>::SharedPtr wrench_service_;
+
+  // Simulation state (NEW - from MujocoRos2Control)
+  enum class SimulationState { PAUSED, RUNNING };
+  SimulationState sim_state_{SimulationState::RUNNING};  // Start running
+  mutable std::mutex sim_state_mutex_;
+
+  // External wrench (NEW)
+  struct ActiveWrench {
+    int body_id = -1;
+    double fx = 0.0, fy = 0.0, fz = 0.0;
+    double tx = 0.0, ty = 0.0, tz = 0.0;
+    double end_time = 0.0;
+    bool active = false;
+  };
+  ActiveWrench active_wrench_;
+  std::mutex wrench_mutex_;
+
+  // Keyframe reset (NEW)
+  struct PendingReset {
+    std::string keyframe;
+    bool pending = false;
+  };
+  PendingReset pending_reset_;
+  std::mutex reset_mutex_;
 };
 }  // namespace mujoco_ros2_control
 

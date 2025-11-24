@@ -16,6 +16,7 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
 
   <depend>rclcpp</depend>
+  <depend>rclcpp_lifecycle</depend>
   <depend>mujoco_ros2_control_msgs</depend>
   <depend>hardware_interface</depend>
   <depend>controller_manager</depend>
@@ -23,6 +24,10 @@
   <depend>pluginlib</depend>
   <depend>urdf</depend>
   <depend>control_toolbox</depend>
+  <depend>ament_index_cpp</depend>
+  <depend>rosgraph_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
   <exec_depend>ros2controlcli</exec_depend>
   <exec_depend>joint_state_broadcaster</exec_depend>
   <exec_depend>effort_controllers</exec_depend>

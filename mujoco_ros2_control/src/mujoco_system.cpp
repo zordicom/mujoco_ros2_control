@@ -25,9 +25,166 @@
 #include <fstream>
 #include <cstring>
 
+// For package path resolution
+#include <ament_index_cpp/get_package_share_directory.hpp>
+
 namespace mujoco_ros2_control
 {
 MujocoSystem::MujocoSystem() : logger_(rclcpp::get_logger("")) {}
+
+CallbackReturn MujocoSystem::on_init(const hardware_interface::HardwareInfo& info) {
+  if (hardware_interface::SystemInterface::on_init(info) != CallbackReturn::SUCCESS) {
+    return CallbackReturn::ERROR;
+  }
+
+  lifecycle_mode_ = true;
+  logger_ = rclcpp::get_logger("mujoco_system");
+
+  // Parse mujoco_model + mujoco_model_package (picknik-style params)
+  auto model_it = info_.hardware_parameters.find("mujoco_model");
+  auto pkg_it = info_.hardware_parameters.find("mujoco_model_package");
+
+  if (model_it == info_.hardware_parameters.end() ||
+      pkg_it == info_.hardware_parameters.end()) {
+    RCLCPP_ERROR(logger_, "Missing required parameters: mujoco_model, mujoco_model_package");
+    return CallbackReturn::ERROR;
+  }
+
+  try {
+    std::string pkg_share = ament_index_cpp::get_package_share_directory(pkg_it->second);
+    mujoco_model_path_ = pkg_share + "/" + model_it->second;
+    RCLCPP_INFO(logger_, "MuJoCo model path: %s", mujoco_model_path_.c_str());
+  } catch (const std::exception& e) {
+    RCLCPP_ERROR(logger_, "Failed to resolve package '%s': %s",
+                 pkg_it->second.c_str(), e.what());
+    return CallbackReturn::ERROR;
+  }
+
+  return CallbackReturn::SUCCESS;
+}
+
+CallbackReturn MujocoSystem::on_configure(const rclcpp_lifecycle::State& /* prev */) {
+  RCLCPP_INFO(logger_, "Configuring MujocoSystem...");
+
+  // Load MuJoCo model
+  char error[1000];
+  mj_model_ = mj_loadXML(mujoco_model_path_.c_str(), 0, error, 1000);
+  if (!mj_model_) {
+    RCLCPP_ERROR(logger_, "Failed to load model: %s", error);
+    return CallbackReturn::ERROR;
+  }
+  owns_mujoco_model_ = true;
+  mj_data_ = mj_makeData(mj_model_);
+
+  RCLCPP_INFO(logger_, "MuJoCo model loaded: nq=%d nv=%d nu=%d",
+              mj_model_->nq, mj_model_->nv, mj_model_->nu);
+
+  // Create ROS node for services and publishers
+  node_ = rclcpp::Node::make_shared("mujoco_system");
+  node_->set_parameter(rclcpp::Parameter("use_sim_time", false));  // We ARE sim time
+
+  // Clock publisher
+  clock_publisher_ = node_->create_publisher<rosgraph_msgs::msg::Clock>("/clock", 10);
+
+  // Diagnostic publisher
+  qfrc_bias_publisher_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>(
+    "~/qfrc_bias", 10);
+
+  // Create services (note correct field names from service definitions)
+  reset_service_ = node_->create_service<mujoco_ros2_control_msgs::srv::ResetToKeyframe>(
+    "~/reset_to_keyframe",
+    std::bind(&MujocoSystem::handle_reset_to_keyframe, this,
+              std::placeholders::_1, std::placeholders::_2));
+
+  sim_control_service_ = node_->create_service<mujoco_ros2_control_msgs::srv::SimulationControl>(
+    "~/simulation_control",
+    std::bind(&MujocoSystem::handle_simulation_control, this,
+              std::placeholders::_1, std::placeholders::_2));
+
+  wrench_service_ = node_->create_service<mujoco_ros2_control_msgs::srv::ApplyExternalWrench>(
+    "~/apply_external_wrench",
+    std::bind(&MujocoSystem::handle_apply_external_wrench, this,
+              std::placeholders::_1, std::placeholders::_2));
+
+  // Spin node in background
+  executor_ = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
+  executor_->add_node(node_);
+  executor_thread_ = std::thread([this]() { executor_->spin(); });
+
+  // Register joints
+  urdf::Model urdf;
+  register_joints(urdf, info_);
+  register_sensors(urdf, info_);
+
+  RCLCPP_INFO(logger_, "MujocoSystem configured successfully");
+  RCLCPP_INFO(logger_, "Services available:");
+  RCLCPP_INFO(logger_, "  - ~/reset_to_keyframe");
+  RCLCPP_INFO(logger_, "  - ~/simulation_control");
+  RCLCPP_INFO(logger_, "  - ~/apply_external_wrench");
+
+  return CallbackReturn::SUCCESS;
+}
+
+CallbackReturn MujocoSystem::on_activate(const rclcpp_lifecycle::State& /* prev */) {
+  RCLCPP_INFO(logger_, "Activating MujocoSystem...");
+
+  // Reset simulation
+  mj_resetData(mj_model_, mj_data_);
+
+  // Load keyframe if specified
+  auto kf_it = info_.hardware_parameters.find("initial_keyframe");
+  if (kf_it != info_.hardware_parameters.end()) {
+    reset_to_keyframe(kf_it->second);
+  }
+
+  // Sync commands with state
+  for (auto& joint : joint_states_) {
+    joint.position_command = mj_data_->qpos[joint.mj_pos_adr];
+    joint.velocity_command = 0.0;
+    joint.effort_command = 0.0;
+  }
+
+  // Start in RUNNING state
+  {
+    std::lock_guard<std::mutex> lock(sim_state_mutex_);
+    sim_state_ = SimulationState::RUNNING;
+  }
+
+  RCLCPP_INFO(logger_, "MujocoSystem active with %zu joints", joint_states_.size());
+  return CallbackReturn::SUCCESS;
+}
+
+CallbackReturn MujocoSystem::on_deactivate(const rclcpp_lifecycle::State& /* prev */) {
+  RCLCPP_INFO(logger_, "Deactivating MujocoSystem...");
+  return CallbackReturn::SUCCESS;
+}
+
+CallbackReturn MujocoSystem::on_cleanup(const rclcpp_lifecycle::State& /* prev */) {
+  RCLCPP_INFO(logger_, "Cleaning up MujocoSystem...");
+
+  // Stop executor thread
+  if (executor_) {
+    executor_->cancel();
+  }
+  if (executor_thread_.joinable()) {
+    executor_thread_.join();
+  }
+
+  // Free MuJoCo resources (only if we own them)
+  if (owns_mujoco_model_) {
+    if (mj_data_) {
+      mj_deleteData(mj_data_);
+      mj_data_ = nullptr;
+    }
+    if (mj_model_) {
+      mj_deleteModel(mj_model_);
+      mj_model_ = nullptr;
+    }
+    owns_mujoco_model_ = false;
+  }
+
+  return CallbackReturn::SUCCESS;
+}
 
 std::vector<hardware_interface::StateInterface> MujocoSystem::export_state_interfaces()
 {
@@ -244,6 +401,75 @@ hardware_interface::return_type MujocoSystem::write(
     }
   }
 
+  // Lifecycle mode: Handle stepping, pause, services
+  if (lifecycle_mode_) {
+    // Check for pending keyframe reset
+    {
+      std::lock_guard<std::mutex> lock(reset_mutex_);
+      if (pending_reset_.pending) {
+        reset_to_keyframe(pending_reset_.keyframe);
+        pending_reset_.pending = false;
+      }
+    }
+
+    // Check if paused
+    bool is_paused;
+    {
+      std::lock_guard<std::mutex> lock(sim_state_mutex_);
+      is_paused = (sim_state_ == SimulationState::PAUSED);
+    }
+
+    if (is_paused) {
+      // Paused: Update derived quantities without advancing time
+      mj_forward(mj_model_, mj_data_);
+      return hardware_interface::return_type::OK;
+    }
+
+    // Step simulation
+    mj_step1(mj_model_, mj_data_);
+
+    // Apply external wrench if active
+    {
+      std::lock_guard<std::mutex> lock(wrench_mutex_);
+      if (active_wrench_.active && active_wrench_.body_id >= 0) {
+        mjtNum* xfrc = &mj_data_->xfrc_applied[6 * active_wrench_.body_id];
+        double now = mj_data_->time;
+
+        if (now <= active_wrench_.end_time) {
+          xfrc[0] = active_wrench_.fx;
+          xfrc[1] = active_wrench_.fy;
+          xfrc[2] = active_wrench_.fz;
+          xfrc[3] = active_wrench_.tx;
+          xfrc[4] = active_wrench_.ty;
+          xfrc[5] = active_wrench_.tz;
+        } else {
+          // Expired, clear
+          for (int i = 0; i < 6; i++) xfrc[i] = 0.0;
+          active_wrench_.active = false;
+        }
+      }
+    }
+
+    mj_step2(mj_model_, mj_data_);
+
+    // Publish clock
+    double sim_time = mj_data_->time;
+    int sec = static_cast<int>(sim_time);
+    int nsec = static_cast<int>((sim_time - sec) * 1e9);
+    rosgraph_msgs::msg::Clock clock_msg;
+    clock_msg.clock = rclcpp::Time(sec, nsec, RCL_ROS_TIME);
+    clock_publisher_->publish(clock_msg);
+
+    // Publish qfrc_bias
+    std_msgs::msg::Float64MultiArray qfrc_msg;
+    qfrc_msg.data.resize(mj_model_->nv);
+    for (int i = 0; i < mj_model_->nv; i++) {
+      qfrc_msg.data[i] = mj_data_->qfrc_bias[i];
+    }
+    qfrc_bias_publisher_->publish(qfrc_msg);
+  }
+  // Mode 2: MujocoRos2Control handles stepping
+
   return hardware_interface::return_type::OK;
 }
 
@@ -336,6 +562,10 @@ bool MujocoSystem::init_sim(
   mjModel *mujoco_model, mjData *mujoco_data, const urdf::Model &urdf_model,
   const hardware_interface::HardwareInfo &hardware_info)
 {
+  // Mode 2: Standalone node provides model
+  lifecycle_mode_ = false;      // DON'T step in write()
+  owns_mujoco_model_ = false;   // DON'T free in cleanup
+
   mj_model_ = mujoco_model;
   mj_data_ = mujoco_data;
 
@@ -417,13 +647,13 @@ void MujocoSystem::register_joints(
         const double bias0 = mj_model_->actuator_biasprm[act_id * 10];
         const double bias1 = mj_model_->actuator_biasprm[act_id * 10 + 1];
         const double bias2 = mj_model_->actuator_biasprm[act_id * 10 + 2];
-        
-        RCLCPP_INFO(logger_, 
+
+        RCLCPP_INFO(logger_,
           "  %s: dyn=%d, gain_t=%d, bias_t=%d, gain=[%.2f,%.2f], bias=[%.2f,%.2f,%.2f]",
           name.c_str(), dyn_type, gain_type, bias_type, gain0, gain1, bias0, bias1, bias2);
       }
     };
-    
+
     log_actuator_params(joint_state.mj_pos_actuator_id, "pos");
     log_actuator_params(joint_state.mj_vel_actuator_id, "vel");
     log_actuator_params(joint_state.mj_tau_actuator_id, "tau");
@@ -1029,6 +1259,82 @@ control_toolbox::Pid MujocoSystem::get_pid_gains(
 
   return control_toolbox::Pid(kp, ki, kd, i_max, i_min, enable_anti_windup);
 }
+
+void MujocoSystem::handle_reset_to_keyframe(
+  const std::shared_ptr<mujoco_ros2_control_msgs::srv::ResetToKeyframe::Request> req,
+  std::shared_ptr<mujoco_ros2_control_msgs::srv::ResetToKeyframe::Response> res)
+{
+  std::lock_guard<std::mutex> lock(reset_mutex_);
+  pending_reset_.keyframe = req->keyframe;  // Field name is 'keyframe'
+  pending_reset_.pending = true;
+  res->success = true;
+  res->message = "Reset to keyframe '" + req->keyframe + "' scheduled";
+  RCLCPP_INFO(logger_, "Reset to keyframe '%s' requested", req->keyframe.c_str());
+}
+
+void MujocoSystem::handle_simulation_control(
+  const std::shared_ptr<mujoco_ros2_control_msgs::srv::SimulationControl::Request> req,
+  std::shared_ptr<mujoco_ros2_control_msgs::srv::SimulationControl::Response> res)
+{
+  std::lock_guard<std::mutex> lock(sim_state_mutex_);
+
+  if (req->command == "pause") {
+    sim_state_ = SimulationState::PAUSED;
+    res->success = true;
+    res->message = "Simulation paused";
+    res->current_state = "PAUSED";
+    RCLCPP_INFO(logger_, "Simulation PAUSED");
+  } else if (req->command == "unpause") {
+    sim_state_ = SimulationState::RUNNING;
+    res->success = true;
+    res->message = "Simulation running";
+    res->current_state = "RUNNING";
+    RCLCPP_INFO(logger_, "Simulation RUNNING");
+  } else if (req->command == "reset") {
+    mj_resetData(mj_model_, mj_data_);
+    res->success = true;
+    res->message = "Simulation reset";
+    res->current_state = (sim_state_ == SimulationState::RUNNING) ? "RUNNING" : "PAUSED";
+    RCLCPP_INFO(logger_, "Simulation RESET");
+  } else if (req->command == "status") {
+    res->success = true;
+    res->message = "Status query";
+    res->current_state = (sim_state_ == SimulationState::RUNNING) ? "RUNNING" : "PAUSED";
+  } else {
+    res->success = false;
+    res->message = "Unknown command: " + req->command;
+    res->current_state = (sim_state_ == SimulationState::RUNNING) ? "RUNNING" : "PAUSED";
+  }
+}
+
+void MujocoSystem::handle_apply_external_wrench(
+  const std::shared_ptr<mujoco_ros2_control_msgs::srv::ApplyExternalWrench::Request> req,
+  std::shared_ptr<mujoco_ros2_control_msgs::srv::ApplyExternalWrench::Response> res)
+{
+  std::lock_guard<std::mutex> lock(wrench_mutex_);
+
+  int body_id = mj_name2id(mj_model_, mjOBJ_BODY, req->body_name.c_str());
+  if (body_id < 0) {
+    res->accepted = false;  // Field name is 'accepted'
+    res->message = "Body not found: " + req->body_name;
+    return;
+  }
+
+  active_wrench_.body_id = body_id;
+  active_wrench_.fx = req->wrench.force.x;
+  active_wrench_.fy = req->wrench.force.y;
+  active_wrench_.fz = req->wrench.force.z;
+  active_wrench_.tx = req->wrench.torque.x;
+  active_wrench_.ty = req->wrench.torque.y;
+  active_wrench_.tz = req->wrench.torque.z;
+  active_wrench_.end_time = mj_data_->time + req->duration;  // Convert to absolute time
+  active_wrench_.active = true;
+
+  res->accepted = true;
+  res->message = "Wrench applied successfully";
+  RCLCPP_INFO(logger_, "Wrench applied to '%s' for %.2fs", req->body_name.c_str(), req->duration);
+}
+
 }  // namespace mujoco_ros2_control
 
 #include "pluginlib/class_list_macros.hpp"

@@ -28,6 +28,11 @@ find_package(urdf REQUIRED)
 find_package(glfw3 REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(control_toolbox REQUIRED)
+find_package(ament_index_cpp REQUIRED)
+find_package(rosgraph_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(rclcpp_lifecycle REQUIRED)
 
 set(THIS_PACKAGE_DEPENDS
   ament_cmake
@@ -40,6 +45,11 @@ set(THIS_PACKAGE_DEPENDS
   urdf
   glfw3
   control_toolbox
+  ament_index_cpp
+  rosgraph_msgs
+  std_msgs
+  geometry_msgs
+  rclcpp_lifecycle
 )
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
