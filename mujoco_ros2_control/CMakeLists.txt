@@ -33,6 +33,7 @@ find_package(rosgraph_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
+find_package(sensor_msgs REQUIRED)
 
 set(THIS_PACKAGE_DEPENDS
   ament_cmake
@@ -50,6 +51,7 @@ set(THIS_PACKAGE_DEPENDS
   std_msgs
   geometry_msgs
   rclcpp_lifecycle
+  sensor_msgs
 )
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
@@ -87,16 +89,21 @@ install(TARGETS
   RUNTIME DESTINATION bin
 )
 
-# TODO: make it simple
-add_executable(mujoco_ros2_control
-  src/mujoco_ros2_control_node.cpp
-  src/mujoco_rendering.cpp
-  src/mujoco_ros2_control.cpp
-  src/mujoco_cameras.cpp
-)
-ament_target_dependencies(mujoco_ros2_control ${THIS_PACKAGE_DEPENDS})
-target_link_libraries(mujoco_ros2_control ${MUJOCO_LIB} glfw)
-target_include_directories(mujoco_ros2_control
+# Build rendering and cameras as libraries for viewer to use
+add_library(mujoco_rendering SHARED src/mujoco_rendering.cpp)
+ament_target_dependencies(mujoco_rendering ${THIS_PACKAGE_DEPENDS})
+target_link_libraries(mujoco_rendering ${MUJOCO_LIB} glfw)
+target_include_directories(mujoco_rendering
+  PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+    ${MUJOCO_INCLUDE_DIR}
+    ${EIGEN3_INCLUDE_DIR})
+
+add_library(mujoco_cameras SHARED src/mujoco_cameras.cpp)
+ament_target_dependencies(mujoco_cameras ${THIS_PACKAGE_DEPENDS})
+target_link_libraries(mujoco_cameras ${MUJOCO_LIB} glfw)
+target_include_directories(mujoco_cameras
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
@@ -104,8 +111,31 @@ target_include_directories(mujoco_ros2_control
     ${EIGEN3_INCLUDE_DIR})
 
 install(TARGETS
-  mujoco_ros2_control
+  mujoco_rendering
+  mujoco_cameras
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
+)
+
+# Viewer executable
+add_executable(mujoco_viewer src/mujoco_viewer_node.cpp)
+ament_target_dependencies(mujoco_viewer ${THIS_PACKAGE_DEPENDS})
+target_link_libraries(mujoco_viewer ${MUJOCO_LIB} mujoco_rendering glfw)
+target_include_directories(mujoco_viewer
+  PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+    ${MUJOCO_INCLUDE_DIR}
+    ${EIGEN3_INCLUDE_DIR})
+
+install(TARGETS
+  mujoco_viewer
   DESTINATION lib/${PROJECT_NAME})
+
+# Install launch files
+install(DIRECTORY launch
+  DESTINATION share/${PROJECT_NAME}/)
 
 pluginlib_export_plugin_description_file(mujoco_ros2_control mujoco_system_plugins.xml)
 ament_package()

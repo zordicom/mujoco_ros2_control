@@ -41,6 +41,9 @@
 #include "rosgraph_msgs/msg/clock.hpp"
 #include "std_msgs/msg/float64_multi_array.hpp"
 
+// Camera support
+#include "mujoco_ros2_control/mujoco_cameras.hpp"
+
 namespace mujoco_ros2_control
 {
 constexpr char PARAM_KP[]{"_kp"};
@@ -68,10 +71,6 @@ public:
     const rclcpp::Time &time, const rclcpp::Duration &period) override;
   hardware_interface::return_type write(
     const rclcpp::Time &time, const rclcpp::Duration &period) override;
-
-  bool init_sim(
-    mjModel *mujoco_model, mjData *mujoco_data, const urdf::Model &urdf_model,
-    const hardware_interface::HardwareInfo &hardware_info) override;
 
   // Command mode switching support (called by controller manager when controllers start/stop)
   hardware_interface::return_type prepare_command_mode_switch(
@@ -163,6 +162,9 @@ private:
     const hardware_interface::ComponentInfo &joint_info, std::string command_interface);
   double clamp(double v, double lo, double hi) { return (v < lo) ? lo : (hi < v) ? hi : v; }
 
+  // Helper to create services and publishers (shared by both modes)
+  void create_services_and_publishers();
+
   // Service handlers (NEW - adapted from MujocoRos2Control)
   void handle_reset_to_keyframe(
     const std::shared_ptr<mujoco_ros2_control_msgs::srv::ResetToKeyframe::Request> req,
@@ -188,9 +190,6 @@ private:
 
   rclcpp::Logger logger_;
 
-  // Mode tracking
-  bool lifecycle_mode_{false};
-  bool owns_mujoco_model_{false};
   std::string mujoco_model_path_;
 
   // ROS infrastructure (for lifecycle mode)
@@ -209,9 +208,9 @@ private:
   rclcpp::Service<mujoco_ros2_control_msgs::srv::SimulationControl>::SharedPtr sim_control_service_;
   rclcpp::Service<mujoco_ros2_control_msgs::srv::ApplyExternalWrench>::SharedPtr wrench_service_;
 
-  // Simulation state (NEW - from MujocoRos2Control)
+  // Simulation state
   enum class SimulationState { PAUSED, RUNNING };
-  SimulationState sim_state_{SimulationState::RUNNING};  // Start running
+  SimulationState sim_state_{SimulationState::PAUSED};  // Start paused
   mutable std::mutex sim_state_mutex_;
 
   // External wrench (NEW)
@@ -232,6 +231,13 @@ private:
   };
   PendingReset pending_reset_;
   std::mutex reset_mutex_;
+
+  // Camera support
+  std::unique_ptr<MujocoCameras> cameras_;
+  bool enable_cameras_{false};
+  double camera_publish_rate_{6.0};
+  int camera_counter_{0};
+  int camera_interval_{10};
 };
 }  // namespace mujoco_ros2_control
 

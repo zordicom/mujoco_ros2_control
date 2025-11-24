@@ -8,6 +8,17 @@ This guide provides comprehensive testing procedures for the 2-DOF vertical doub
 
 The `test_2dof_gravity` example features a vertical double pendulum where q=[0, 0] is the natural hanging configuration (stable equilibrium). The test demonstrates gravity compensation by maintaining the robot at various configurations against gravity, starting from q=[0.3, -0.2] which provides measurable gravity torques for verification.
 
+### Architecture
+
+This demo uses the unified lifecycle architecture:
+
+- **Simulation:** MujocoSystem plugin loaded by controller_manager
+- **Visualization:** Optional mujoco_viewer (separate process, standard MuJoCo GLFW interface)
+- **Control:** Plugin steps simulation in `write()` method (1000 Hz)
+- **Services:** Accessible to both viewer and external tools at `/mujoco_system/*`
+
+The plugin owns the MuJoCo model and simulation. The viewer (if launched) only displays joint states - it does not run simulation.
+
 ### System Specifications
 
 **Physical Configuration:**
@@ -68,8 +79,9 @@ ros2 launch mujoco_ros2_control_demos test_2dof_gravity.launch.py
 
 This launches:
 
-- MuJoCo simulation with viewer (visual feedback)
-- 2-DOF vertical double pendulum starting at q=[0.3, -0.2] (test_pose)
+- Controller manager with MujocoSystem plugin (lifecycle mode)
+- MuJoCo interactive viewer (optional, visualization only)
+- 2-DOF vertical double pendulum
 - Robot state publisher
 - Joint state broadcaster (active)
 - Five Zordi controllers + one ROS-native (all inactive):
@@ -80,16 +92,27 @@ This launches:
   - `zordi_cartesian_rnea_controller` - Cartesian with RNEA
   - `joint_trajectory_controller` - ROS-native (no gravity comp)
 
-**Note:** The robot starts at `test_pose` (q=[0.3, -0.2]) rather than fully hanging (q=[0, 0]) for better testing. This provides a configuration with some gravity torque to verify compensation is working.
+**Note:** The robot is reset to `test_pose` (q=[0.3, -0.2]) after launch via service call. This provides a configuration with some gravity torque to verify compensation is working.
 
-**Important:** The simulation starts in **PAUSED** state. You must unpause it after activating a controller for the robot to move. Use:
+**Launch Arguments:**
 
 ```bash
-ros2 service call /mujoco_ros2_control_node/simulation_control \
-  mujoco_ros2_control_msgs/srv/SimulationControl "{command: 'unpause'}"
+# With viewer (default)
+ros2 launch mujoco_ros2_control_demos test_2dof_gravity.launch.py
+
+# Without viewer
+ros2 launch mujoco_ros2_control_demos test_2dof_gravity.launch.py show_viewer:=false
 ```
 
-**Available keyframes** (can be set via `initial_keyframe` parameter):
+**Available keyframes** (defined in MuJoCo XML, loaded via service):
+
+```bash
+ros2 service call /mujoco_system/reset_to_keyframe \
+  mujoco_ros2_control_msgs/srv/ResetToKeyframe \
+  "{keyframe: 'test_pose'}"
+```
+
+Keyframe options:
 
 - `test_pose`: q=[0.3, -0.2] - Default, near hanging with some offset
 - `home`: q=[0, 0] - Both links hanging straight down (stable equilibrium)
@@ -130,26 +153,12 @@ ros2 topic echo /joint_states
 ros2 control set_controller_state zordi_grav_comp_controller active
 ```
 
-2. **Unpause the simulation:**
-
-```bash
-ros2 service call /mujoco_ros2_control_node/simulation_control \
-  mujoco_ros2_control_msgs/srv/SimulationControl "{command: 'unpause'}"
-```
-
-Expected response:
-
-```
-response:
-  success: True
-  message: 'Simulation unpaused'
-  current_state: 'RUNNING'
-```
-
-3. **Observe behavior:**
+2. **Observe behavior:**
    - Robot should hold position at q=[0.3, -0.2]
    - Robot should be backdrivable (you can push it in simulation)
    - No trajectory tracking active - purely gravity compensation
+
+**Note:** Simulation starts in RUNNING state (no need to unpause).
 
 **Success Criteria:**
 
@@ -171,14 +180,12 @@ ros2 control switch_controllers \
   --deactivate zordi_grav_comp_controller
 ```
 
-2. **Unpause the simulation:**
+2. **Unpause if needed:**
 
 ```bash
-ros2 service call /mujoco_ros2_control_node/simulation_control \
+ros2 service call /mujoco_system/simulation_control \
   mujoco_ros2_control_msgs/srv/SimulationControl "{command: 'unpause'}"
 ```
-
-**Important:** Wait 1-2 seconds after unpausing before sending trajectories!
 
 3. **Send a multi-waypoint trajectory:**
 
@@ -432,17 +439,17 @@ ros2 control switch_controllers \
 ### Simulation Control
 
 ```bash
-# Unpause simulation (required after launching)
-ros2 service call /mujoco_ros2_control_node/simulation_control \
-  mujoco_ros2_control_msgs/srv/SimulationControl "{command: 'unpause'}"
-
 # Pause simulation
-ros2 service call /simulation_control \
+ros2 service call /mujoco_system/simulation_control \
   mujoco_ros2_control_msgs/srv/SimulationControl "{command: 'pause'}"
 
-# Reset to initial keyframe
-ros2 service call /reset_to_keyframe \
-  mujoco_ros2_control_msgs/srv/ResetToKeyframe "{keyframe_name: 'test_pose'}"
+# Unpause simulation
+ros2 service call /mujoco_system/simulation_control \
+  mujoco_ros2_control_msgs/srv/SimulationControl "{command: 'unpause'}"
+
+# Reset to keyframe (defined in MuJoCo XML)
+ros2 service call /mujoco_system/reset_to_keyframe \
+  mujoco_ros2_control_msgs/srv/ResetToKeyframe "{keyframe: 'test_pose'}"
 ```
 
 ### Monitoring

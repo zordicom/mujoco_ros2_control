@@ -48,8 +48,10 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import ExecuteProcess, RegisterEventHandler
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, RegisterEventHandler
+from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessStart
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
@@ -65,20 +67,29 @@ def generate_launch_description():
     # Read URDF
     robot_description = Path(urdf_file).read_text(encoding="utf-8")
 
-    # MuJoCo node with ros2_control
-    mujoco_node = Node(
-        package="mujoco_ros2_control",
-        executable="mujoco_ros2_control",
+    # Controller manager node (replaces old mujoco_ros2_control_node)
+    controller_manager_node = Node(
+        package="controller_manager",
+        executable="ros2_control_node",
         parameters=[
+            {"robot_description": robot_description},
             str(controller_config),
-            {
-                "robot_description": robot_description,
-                "mujoco_model_path": str(mujoco_model),
-                "headless": False,  # Show viewer
-                "initial_keyframe": "test_pose",  # Start at q=[0.3, -0.2]
-                "use_sim_time": True,  # Use MuJoCo simulation clock
-            },
         ],
+        output="screen",
+    )
+
+    # Optional MuJoCo viewer (separate process)
+    viewer_node = Node(
+        package="mujoco_ros2_control",
+        executable="mujoco_viewer",
+        name="mujoco_viewer",
+        parameters=[
+            {
+                "mujoco_model_path": str(mujoco_model),
+                "service_namespace": "/mujoco_system",
+            }
+        ],
+        condition=IfCondition(LaunchConfiguration("show_viewer")),
         output="screen",
     )
 
@@ -175,10 +186,30 @@ def generate_launch_description():
         output="screen",
     )
 
+    # Reset to test_pose keyframe after controllers load
+    reset_to_test_pose = ExecuteProcess(
+        cmd=[
+            "ros2",
+            "service",
+            "call",
+            "/mujoco_system/reset_to_keyframe",
+            "mujoco_ros2_control_msgs/srv/ResetToKeyframe",
+            "{keyframe: 'test_pose'}",
+        ],
+        output="screen",
+    )
+
     return LaunchDescription([
-        mujoco_node,
+        # Launch argument for viewer
+        DeclareLaunchArgument(
+            "show_viewer",
+            default_value="true",
+            description="Launch MuJoCo interactive viewer (default: true)",
+        ),
+        controller_manager_node,
         robot_state_pub_node,
-        # Load controllers when mujoco node starts
+        viewer_node,
+        # Load controllers when controller_manager starts
         # All 6 controllers loaded in inactive state - activate manually:
         #   - zordi_grav_comp_controller: Pure gravity compensation
         #   - zordi_joint_trajectory_controller: Joint space with gravity
@@ -188,7 +219,7 @@ def generate_launch_description():
         #   - joint_trajectory_controller: ROS-native (no gravity comp)
         RegisterEventHandler(
             event_handler=OnProcessStart(
-                target_action=mujoco_node,
+                target_action=controller_manager_node,
                 on_start=[
                     load_joint_state_broadcaster,
                     load_zordi_grav_comp_controller,
@@ -197,6 +228,7 @@ def generate_launch_description():
                     load_zordi_cartesian_controller,
                     load_zordi_cartesian_rnea_controller,
                     load_joint_trajectory_controller,
+                    reset_to_test_pose,
                 ],
             )
         ),

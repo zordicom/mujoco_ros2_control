@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <!--
   1-DOF vertical pendulum for testing gravity compensation.
-  
+
   This is a VERTICAL joint (unlike test_1dof_multimode which is horizontal).
   The pendulum hangs down, requiring gravity compensation to hold position.
 -->
@@ -40,6 +40,8 @@
   <ros2_control name="MujocoSystem" type="system">
     <hardware>
       <plugin>mujoco_ros2_control/MujocoSystem</plugin>
+      <param name="mujoco_model">mujoco_models/test_1dof_gravity.xml</param>
+      <param name="mujoco_model_package">mujoco_ros2_control_demos</param>
     </hardware>
     <joint name="j1">
       <command_interface name="position"/>
@@ -48,7 +50,7 @@
       <state_interface name="position"/>
       <state_interface name="velocity"/>
       <state_interface name="effort"/>
-      
+
       <!-- PID gains for MIT-style control -->
       <!-- For 1kg at 0.5m: max gravity torque = 1*9.81*0.5 = 4.9 Nm -->
       <!-- Use high Kp for stiff position control -->
@@ -62,4 +64,3 @@
     </joint>
   </ros2_control>
 </robot>
-

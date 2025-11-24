@@ -33,10 +33,6 @@ using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface
 class MujocoSystemInterface : public hardware_interface::SystemInterface
 {
 public:
-  virtual bool init_sim(
-    mjModel *mujoco_model, mjData *mujoco_data, const urdf::Model &urdf_model,
-    const hardware_interface::HardwareInfo &hardware_info) = 0;
-
   virtual bool reset_to_keyframe(const std::string &keyframe_name_or_idx) = 0;
 
 protected:
