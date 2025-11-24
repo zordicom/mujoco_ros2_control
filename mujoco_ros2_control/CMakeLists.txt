@@ -137,5 +137,5 @@ install(TARGETS
 install(DIRECTORY launch
   DESTINATION share/${PROJECT_NAME}/)
 
-pluginlib_export_plugin_description_file(mujoco_ros2_control mujoco_system_plugins.xml)
+pluginlib_export_plugin_description_file(hardware_interface mujoco_system_plugins.xml)
 ament_package()

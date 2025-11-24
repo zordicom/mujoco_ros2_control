@@ -71,6 +71,31 @@ CallbackReturn MujocoSystem::on_init(const hardware_interface::HardwareInfo& inf
     RCLCPP_INFO(logger_, "Cameras enabled (%.1f Hz)", camera_publish_rate_);
   }
 
+  // Load MuJoCo model (needed for joint registration before export_*_interfaces())
+  char error[1000];
+  mj_model_ = mj_loadXML(mujoco_model_path_.c_str(), 0, error, 1000);
+  if (!mj_model_) {
+    RCLCPP_ERROR(logger_, "Failed to load model: %s", error);
+    return CallbackReturn::ERROR;
+  }
+  mj_data_ = mj_makeData(mj_model_);
+
+  RCLCPP_INFO(logger_, "MuJoCo model loaded: nq=%d nv=%d nu=%d",
+              mj_model_->nq, mj_model_->nv, mj_model_->nu);
+
+  // Parse URDF model
+  urdf::Model urdf;
+  if (!urdf.initString(info_.original_xml)) {
+    RCLCPP_ERROR(logger_, "Failed to parse URDF");
+    return CallbackReturn::ERROR;
+  }
+
+  // Register joints and sensors (populates state_interfaces_ and command_interfaces_)
+  register_joints(urdf, info_);
+  register_sensors(urdf, info_);
+
+  RCLCPP_INFO(logger_, "MujocoSystem initialized successfully");
+
   return CallbackReturn::SUCCESS;
 }
 
@@ -130,25 +155,8 @@ void MujocoSystem::create_services_and_publishers() {
 CallbackReturn MujocoSystem::on_configure(const rclcpp_lifecycle::State& /* prev */) {
   RCLCPP_INFO(logger_, "Configuring MujocoSystem...");
 
-  // Load MuJoCo model
-  char error[1000];
-  mj_model_ = mj_loadXML(mujoco_model_path_.c_str(), 0, error, 1000);
-  if (!mj_model_) {
-    RCLCPP_ERROR(logger_, "Failed to load model: %s", error);
-    return CallbackReturn::ERROR;
-  }
-  mj_data_ = mj_makeData(mj_model_);
-
-  RCLCPP_INFO(logger_, "MuJoCo model loaded: nq=%d nv=%d nu=%d",
-              mj_model_->nq, mj_model_->nv, mj_model_->nu);
-
-  // Create services and publishers (unified for both modes)
+  // Create services and publishers
   create_services_and_publishers();
-
-  // Register joints
-  urdf::Model urdf;
-  register_joints(urdf, info_);
-  register_sensors(urdf, info_);
 
   // Initialize cameras if enabled
   if (enable_cameras_) {
@@ -1341,4 +1349,4 @@ void MujocoSystem::handle_apply_external_wrench(
 
 #include "pluginlib/class_list_macros.hpp"
 PLUGINLIB_EXPORT_CLASS(
-  mujoco_ros2_control::MujocoSystem, mujoco_ros2_control::MujocoSystemInterface)
+  mujoco_ros2_control::MujocoSystem, hardware_interface::SystemInterface)
