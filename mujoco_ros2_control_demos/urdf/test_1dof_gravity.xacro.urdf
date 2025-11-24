@@ -42,6 +42,7 @@
       <plugin>mujoco_ros2_control/MujocoSystem</plugin>
       <param name="mujoco_model">mujoco_models/test_1dof_gravity.xml</param>
       <param name="mujoco_model_package">mujoco_ros2_control_demos</param>
+      <param name="enable_viewer">true</param>
     </hardware>
     <joint name="j1">
       <command_interface name="position"/>
@@ -54,13 +55,12 @@
       <!-- PID gains for MIT-style control -->
       <!-- For 1kg at 0.5m: max gravity torque = 1*9.81*0.5 = 4.9 Nm -->
       <!-- Use high Kp for stiff position control -->
-      <!-- NOTE: Use underscores, not dots, to match PARAM_KP/PARAM_KD constants -->
+      <!-- MIT mode gains (position_kp for Kp, velocity_kp for Kd) -->
       <param name="position_kp">100.0</param>
-      <param name="position_ki">0.0</param>
-      <param name="position_kd">0.0</param>
-      <param name="velocity_kp">0.0</param>
-      <param name="velocity_ki">0.0</param>
-      <param name="velocity_kd">10.0</param>
+      <param name="velocity_kp">10.0</param>
+      <!-- Simple kp/kd aliases for zordi_mit_controller -->
+      <param name="kp">100.0</param>
+      <param name="kd">10.0</param>
     </joint>
   </ros2_control>
 </robot>
