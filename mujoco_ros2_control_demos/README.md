@@ -508,7 +508,7 @@ See the original mujoco_ros2_control documentation for details on these examples
 
 ## References
 
-- **Architecture Overview:** `../doc/mujoco_ros2_control_updates.md`
+- **Architecture Overview:** `../doc/updates.md`
 - **zordi_mit_controller:** `~/ros2_ws/src/zordi_mit_controller/README.md`
 - **MuJoCo Documentation:** <https://mujoco.readthedocs.io/>
 - **ros2_control Documentation:** <https://control.ros.org/>

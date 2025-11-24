@@ -48,7 +48,12 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess, RegisterEventHandler, TimerAction
+from launch.actions import (
+    DeclareLaunchArgument,
+    ExecuteProcess,
+    RegisterEventHandler,
+    TimerAction,
+)
 from launch.event_handlers import OnProcessStart
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -98,42 +103,72 @@ def generate_launch_description():
     load_zordi_grav_comp_controller = Node(
         package="controller_manager",
         executable="spawner",
-        arguments=["zordi_grav_comp_controller", "-c", "/controller_manager", "--inactive"],
+        arguments=[
+            "zordi_grav_comp_controller",
+            "-c",
+            "/controller_manager",
+            "--inactive",
+        ],
         output="screen",
     )
 
     load_zordi_joint_trajectory_controller = Node(
         package="controller_manager",
         executable="spawner",
-        arguments=["zordi_joint_trajectory_controller", "-c", "/controller_manager", "--inactive"],
+        arguments=[
+            "zordi_joint_trajectory_controller",
+            "-c",
+            "/controller_manager",
+            "--inactive",
+        ],
         output="screen",
     )
 
     load_zordi_joint_rnea_controller = Node(
         package="controller_manager",
         executable="spawner",
-        arguments=["zordi_joint_rnea_controller", "-c", "/controller_manager", "--inactive"],
+        arguments=[
+            "zordi_joint_rnea_controller",
+            "-c",
+            "/controller_manager",
+            "--inactive",
+        ],
         output="screen",
     )
 
     load_zordi_cartesian_controller = Node(
         package="controller_manager",
         executable="spawner",
-        arguments=["zordi_cartesian_controller", "-c", "/controller_manager", "--inactive"],
+        arguments=[
+            "zordi_cartesian_controller",
+            "-c",
+            "/controller_manager",
+            "--inactive",
+        ],
         output="screen",
     )
 
     load_zordi_cartesian_rnea_controller = Node(
         package="controller_manager",
         executable="spawner",
-        arguments=["zordi_cartesian_rnea_controller", "-c", "/controller_manager", "--inactive"],
+        arguments=[
+            "zordi_cartesian_rnea_controller",
+            "-c",
+            "/controller_manager",
+            "--inactive",
+        ],
         output="screen",
     )
 
     load_joint_trajectory_controller = Node(
         package="controller_manager",
         executable="spawner",
-        arguments=["joint_trajectory_controller", "-c", "/controller_manager", "--inactive"],
+        arguments=[
+            "joint_trajectory_controller",
+            "-c",
+            "/controller_manager",
+            "--inactive",
+        ],
         output="screen",
     )
 

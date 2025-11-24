@@ -17,16 +17,16 @@ This repository contains a ROS2 control package for MuJoCo simulation, offering 
 
 ### Simulation Control
 
-- **Pause/unpause/reset:** Runtime simulation state management via ROS2 services (see [§13](doc/mujoco_ros2_control_updates.md#13-simulation-control-service-pauseunpausereset))
-- **Initial keyframe support:** Start simulations from predefined configurations using MuJoCo XML keyframes (see [§7](doc/mujoco_ros2_control_updates.md#7-initial-pose-configuration-xml-keyframes))
+- **Pause/unpause/reset:** Runtime simulation state management via ROS2 services (see [doc/updates.md](doc/updates.md#ros-services))
+- **Initial keyframe support:** Start simulations from predefined configurations using MuJoCo XML keyframes (see [doc/updates.md](doc/updates.md#mujoco-model-requirements))
 - **Reset to keyframe:** Return to specific configurations during runtime for repeated testing
 - **Paused startup:** Simulation starts frozen, allowing controller setup before physics execution
 
 ### Physics Integration
 
-- **Zero-lag control:** Commands applied within the same physics step for accurate response (see [§8](doc/mujoco_ros2_control_updates.md#8-real-time-synchronization-fix))
-- **External wrench service:** Apply forces/torques to bodies for disturbance testing (see [§9](doc/mujoco_ros2_control_updates.md#9-external-wrench-service))
-- **Gravity compensation validation:** Publishes MuJoCo's `qfrc_bias` for controller verification (see [§11](doc/mujoco_ros2_control_updates.md#11-gravity-compensation-validation))
+- **Zero-lag control:** Commands applied within the same physics step for accurate response (see [doc/updates.md](doc/updates.md#technical-details))
+- **External wrench service:** Apply forces/torques to bodies for disturbance testing (see [doc/updates.md](doc/updates.md#ros-services))
+- **Gravity compensation validation:** Publishes MuJoCo's `qfrc_bias` for controller verification (see [doc/updates.md](doc/updates.md#topics-published))
 - **Real-time synchronization:** Proper ordering of read/write/step operations
 
 ### Sensor Support
@@ -172,8 +172,7 @@ ros2 topic echo /joint_states
 
 ## Documentation
 
-- [Full Documentation](doc/index.rst) - Complete usage guide
-- [Technical Updates](doc/mujoco_ros2_control_updates.md) - Architectural overview and migration guide
+- [Complete Documentation](doc/updates.md) - Architecture, features, migration guides
 - [Simulation Control Guide](doc/SIMULATION_CONTROL.md) - Pause/unpause/reset functionality
 - [Real-Time Synchronization](doc/REAL_TIME_SYNC_FIX.md) - Control loop timing analysis
 

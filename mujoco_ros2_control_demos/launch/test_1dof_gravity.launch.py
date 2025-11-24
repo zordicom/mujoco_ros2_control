@@ -1,9 +1,16 @@
 """
+Copyright 2025 Zordi, Inc. All rights reserved.
+
 Launch file for 1-DOF gravity compensation and MIT mode demonstrations.
 
 This test uses a VERTICAL pendulum with two controllers:
   1. zordi_grav_comp_controller: Pure gravity compensation (no PD control - fully backdrivable)
   2. zordi_mit_controller: MIT mode with trajectory tracking and gravity compensation
+
+Architecture:
+  - MujocoSystem plugin loaded by controller_manager (lifecycle mode)
+  - Viewer is integrated into plugin (enable via URDF parameter 'enable_viewer')
+  - Plugin handles simulation stepping, services, clock publishing
 
 Test objectives:
   Example 1 (zordi_grav_comp_controller):
@@ -21,15 +28,12 @@ Expected behavior:
   - With MIT controller: pendulum tracks commanded trajectories with gravity comp
 """
 
-import os
 from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess, RegisterEventHandler
-from launch.conditions import IfCondition
+from launch.actions import ExecuteProcess, RegisterEventHandler
 from launch.event_handlers import OnProcessStart
-from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
@@ -56,22 +60,8 @@ def generate_launch_description():
         output="screen",
     )
 
-    # Optional MuJoCo viewer (separate process)
-    viewer_node = Node(
-        package="mujoco_ros2_control",
-        executable="mujoco_viewer",
-        name="mujoco_viewer",
-        parameters=[
-            {
-                "mujoco_model_path": str(mujoco_model),
-                "service_namespace": "/mujoco_system",
-            }
-        ],
-        condition=IfCondition(LaunchConfiguration("show_viewer")),
-        output="screen",
-    )
-
-    # Robot state publisher (needed for controller to fetch robot_description)
+    # Robot state publisher
+    # Note: Viewer is now integrated into MujocoSystem plugin - enable via URDF parameter (needed for controller to fetch robot_description)
     robot_state_pub_node = Node(
         package="robot_state_publisher",
         executable="robot_state_publisher",
@@ -130,15 +120,8 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        # Launch argument for viewer (DISABLED - viewer is non-functional)
-        DeclareLaunchArgument(
-            "show_viewer",
-            default_value="false",
-            description="Launch MuJoCo interactive viewer (CURRENTLY NON-FUNCTIONAL - use RViz instead)",
-        ),
         controller_manager_node,
         robot_state_pub_node,
-        viewer_node,
         # Load controllers when controller_manager starts
         # Both controllers are loaded in inactive state - activate manually as needed:
         #   - zordi_grav_comp_controller: For pure gravity compensation (Example 1)
