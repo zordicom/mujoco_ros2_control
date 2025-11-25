@@ -4,7 +4,7 @@ Copyright 2025 Zordi, Inc. All rights reserved.
 Launch file for 2-DOF planar arm controller demonstrations.
 
 This test uses a HORIZONTAL 2-link planar arm with five Zordi controllers:
-  1. zordi_mit_controller: Gravity compensation and trajectory tracking (joint space)
+  1. zordi_ros_controllers: Gravity compensation and trajectory tracking (joint space)
   2. zordi_mit_rnea_controller: Joint space control with full inverse dynamics (RNEA)
   3. zordi_mit_gravity_controller: Pure gravity compensation, no trajectory tracking (fully backdrivable)
   4. zordi_cartesian_effort_controller: Cartesian impedance control
@@ -70,11 +70,11 @@ def generate_launch_description():
         output="screen",
     )
 
-    load_zordi_mit_controller = Node(
+    load_zordi_ros_controllers = Node(
         package="controller_manager",
         executable="spawner",
         arguments=[
-            "zordi_mit_controller",
+            "zordi_ros_controllers",
             "-c",
             "/controller_manager",
             "--inactive",
@@ -149,13 +149,13 @@ def generate_launch_description():
         # Load controllers using spawner nodes
         # Spawner automatically waits for controller_manager to be ready
         # All five controllers are loaded in inactive state - activate manually:
-        #   - zordi_mit_controller: Joint space gravity comp and trajectory tracking
+        #   - zordi_ros_controllers: Joint space gravity comp and trajectory tracking
         #   - zordi_mit_rnea_controller: Joint space with full inverse dynamics (RNEA)
         #   - zordi_mit_gravity_controller: Pure gravity comp, no trajectory tracking
         #   - zordi_cartesian_effort_controller: Cartesian impedance control
         #   - zordi_cartesian_effort_rnea_controller: Cartesian control with full inverse dynamics
         load_joint_state_broadcaster,
-        load_zordi_mit_controller,
+        load_zordi_ros_controllers,
         load_zordi_mit_rnea_controller,
         load_zordi_mit_gravity_controller,
         load_zordi_cartesian_effort_controller,

@@ -678,7 +678,7 @@ Expected performance on standard hardware (1 kHz control rate):
 
 ## Next Steps
 
-- **For theory:** See controller implementation details in `zordi_mit_controller` package
+- **For theory:** See controller implementation details in `zordi_ros_controllers` package
 - **For hardware deployment:** Adapt URDF and configs to match real robot parameters
 - **For advanced control:** Explore operational space control (`use_operational_space: true`)
 - **For 7-DOF robots:** See nullspace control examples in `USER_GUIDE.md`

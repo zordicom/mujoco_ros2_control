@@ -58,7 +58,7 @@
       <!-- MIT mode gains (position_kp for Kp, velocity_kp for Kd) -->
       <param name="position_kp">100.0</param>
       <param name="velocity_kp">10.0</param>
-      <!-- Simple kp/kd aliases for zordi_mit_controller -->
+      <!-- Simple kp/kd aliases for zordi_ros_controllers -->
       <param name="kp">100.0</param>
       <param name="kd">10.0</param>
     </joint>

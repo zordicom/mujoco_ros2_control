@@ -1,6 +1,6 @@
 # 1-DOF Gravity Compensation Test Configuration
 #
-# Tests zordi_mit_controller with gravity compensation on vertical pendulum.
+# Tests zordi_ros_controllers with gravity compensation on vertical pendulum.
 # Expected: Pendulum holds upright position (q=0) without falling.
 
 controller_manager:
@@ -11,10 +11,10 @@ controller_manager:
       type: joint_state_broadcaster/JointStateBroadcaster
 
     zordi_grav_comp_controller:
-      type: zordi_mit_controller/ZordiJointController
+      type: zordi_ros_controllers/ZordiJointController
 
     zordi_joint_mit_controller:
-      type: zordi_mit_controller/ZordiJointController
+      type: zordi_ros_controllers/ZordiJointController
 
 joint_state_broadcaster:
   ros__parameters:

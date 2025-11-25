@@ -13,7 +13,7 @@ This package demonstrates the key features of `mujoco_ros2_control` using simple
 ```bash
 # Build workspace
 cd ~/ros2_ws
-colcon build --packages-select mujoco_ros2_control mujoco_ros2_control_demos zordi_mit_controller
+colcon build --packages-select mujoco_ros2_control mujoco_ros2_control_demos zordi_ros_controllers
 source install/setup.bash
 ```
 
@@ -188,10 +188,10 @@ The controller claims position, velocity, and effort interfaces, triggering MIT 
 ros2 control set_controller_state zordi_grav_comp_controller inactive
 
 # Activate MIT controller
-ros2 control set_controller_state zordi_mit_controller active
+ros2 control set_controller_state zordi_ros_controllers active
 
 # Send trajectory via action
-ros2 action send_goal /zordi_mit_controller/follow_joint_trajectory \
+ros2 action send_goal /zordi_ros_controllers/follow_joint_trajectory \
   control_msgs/action/FollowJointTrajectory \
   "{trajectory: {joint_names: ['j1'], points: [{positions: [1.0], velocities: [0.0], time_from_start: {sec: 2}}]}}"
 ```
@@ -206,12 +206,12 @@ ros2 action send_goal /zordi_mit_controller/follow_joint_trajectory \
 
 ```bash
 # Move to different positions
-ros2 action send_goal /zordi_mit_controller/follow_joint_trajectory \
+ros2 action send_goal /zordi_ros_controllers/follow_joint_trajectory \
   control_msgs/action/FollowJointTrajectory \
   "{trajectory: {joint_names: ['j1'], points: [{positions: [-0.5], time_from_start: {sec: 1}}]}}"
 
 # Multi-point trajectory
-ros2 action send_goal /zordi_mit_controller/follow_joint_trajectory \
+ros2 action send_goal /zordi_ros_controllers/follow_joint_trajectory \
   control_msgs/action/FollowJointTrajectory \
   "{trajectory: {joint_names: ['j1'], points: [{positions: [0.5], time_from_start: {sec: 1}}, {positions: [-0.5], time_from_start: {sec: 2}}, {positions: [0.0], time_from_start: {sec: 3}}]}}"
 ```
@@ -496,7 +496,7 @@ See the original mujoco_ros2_control documentation for details on these examples
    - Progress to MIT mode for advanced control
 
 3. **Integrate custom controllers:**
-   - Use `zordi_mit_controller` as reference for implementing gravity compensation
+   - Use `zordi_ros_controllers` as reference for implementing gravity compensation
    - Follow ros2_control controller plugin guidelines
 
 4. **Production deployment:**
@@ -509,7 +509,7 @@ See the original mujoco_ros2_control documentation for details on these examples
 ## References
 
 - **Architecture Overview:** `../doc/updates.md`
-- **zordi_mit_controller:** `~/ros2_ws/src/zordi_mit_controller/README.md`
+- **zordi_ros_controllers:** `~/ros2_ws/src/zordi_ros_controllers/README.md`
 - **MuJoCo Documentation:** <https://mujoco.readthedocs.io/>
 - **ros2_control Documentation:** <https://control.ros.org/>
 

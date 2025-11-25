@@ -9,7 +9,7 @@ the end-effector tracking performance.
 
 Usage:
   1. Launch the simulation:
-     ros2 launch zordi_mit_controller test_cartesian_2dof.launch.py
+     ros2 launch zordi_ros_controllers test_cartesian_2dof.launch.py
 
   2. Run this script:
      python3 launch/test_cartesian_2dof_script.py

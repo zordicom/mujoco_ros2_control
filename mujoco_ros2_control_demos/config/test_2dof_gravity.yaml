@@ -10,19 +10,19 @@ controller_manager:
       type: joint_state_broadcaster/JointStateBroadcaster
 
     zordi_grav_comp_controller:
-      type: zordi_mit_controller/ZordiJointController
+      type: zordi_ros_controllers/ZordiJointController
 
     zordi_joint_trajectory_controller:
-      type: zordi_mit_controller/ZordiJointController
+      type: zordi_ros_controllers/ZordiJointController
 
     zordi_joint_mit_rnea_controller:
-      type: zordi_mit_controller/ZordiJointRNEAController
+      type: zordi_ros_controllers/ZordiJointRNEAController
 
     zordi_cartesian_effort_controller:
-      type: zordi_mit_controller/ZordiCartesianController
+      type: zordi_ros_controllers/ZordiCartesianController
 
     zordi_cartesian_effort_rnea_controller:
-      type: zordi_mit_controller/ZordiCartesianRNEAController
+      type: zordi_ros_controllers/ZordiCartesianRNEAController
 
     joint_trajectory_controller:
       type: joint_trajectory_controller/JointTrajectoryController
