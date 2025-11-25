@@ -215,58 +215,54 @@ zordi_joint_effort_grav_comp_controller:
     compute_pd_internally: false  # No PD needed in gravity comp only mode
 
 # Zordi Cartesian IK Controller (Cartesian to Joint via IK)
+# Note: IK controller does NOT claim command/state interfaces (forwards to JTC)
 zordi_cartesian_ik_controller:
   ros__parameters:
     joints:
       - joint1
       - joint2
 
-    # Does not claim command interfaces (forwards to JTC)
-    command_interfaces: []
-    state_interfaces:
-      - position
-      - velocity
-
     # Frames
     end_effector_frame: "ee_link"
     base_frame: "base_link"
 
     # Target JTC to forward commands to (any controller with FollowJointTrajectory action)
-    # Can be: zordi_joint_effort_controller, zordi_joint_mit_controller, 
+    # Can be: zordi_joint_effort_controller, zordi_joint_mit_controller,
     #         joint_trajectory_controller (ROS native), etc.
-    target_controller: "joint_trajectory_controller"  # Using ROS native JTC
+    target_controller: "zordi_joint_effort_controller"
 
     # IK solver parameters
     ik:
       max_iterations: 1000
       tolerance: 1.0e-6
-      damping: 0.01  # Damped least squares
+      damping: 0.01
+      step_size: 1.0
 
-    # Nullspace optimization (not used for 2-DOF, but configured)
+    # Nullspace optimization (not used for 2-DOF, not redundant)
     nullspace:
-      stiffness: 5.0
-      weights: [1.0, 1.0]
+      enabled: false
+      gain: 0.5
+      # preferred_config: []  # Commented out - not needed for 2-DOF
 
-# ROS Native Joint Trajectory Controller (used by IK controller)
+    # Joint limits
+    joint_limits:
+      margin: 0.05
+      use_urdf_limits: true
+
+    # Trajectory timing
+    default_waypoint_duration: 2.0
+
+# ROS Native Joint Trajectory Controller
 joint_trajectory_controller:
   ros__parameters:
     joints:
       - joint1
       - joint2
 
+    # Use position interface (ROS native JTC doesn't support mixing interfaces)
     command_interfaces:
       - position
-      - velocity
-      - effort
 
     state_interfaces:
       - position
       - velocity
-
-    # Action configuration
-    action_monitor_rate: 20.0  # Hz
-    
-    # Tolerances (used when goals specify tolerances)
-    constraints:
-      stopped_velocity_tolerance: 0.01  # rad/s
-      goal_time: 0.0  # Disabled (use per-goal tolerance)

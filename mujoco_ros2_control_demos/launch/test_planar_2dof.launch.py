@@ -9,15 +9,13 @@ This test uses a HORIZONTAL 2-link planar arm with seven controllers:
   3. zordi_joint_effort_grav_comp_controller: Pure gravity compensation (fully backdrivable)
   4. zordi_cartesian_effort_controller: Cartesian impedance control
   5. zordi_cartesian_effort_rnea_controller: Cartesian control with full inverse dynamics (RNEA)
-  6. zordi_cartesian_ik_controller: Cartesian IK that forwards to JTC
-  7. joint_trajectory_controller: ROS native JTC (used by IK controller)
+  6. zordi_cartesian_ik_controller: Cartesian IK that forwards to zordi_joint_effort_controller
+  7. joint_trajectory_controller: ROS native JTC (for interoperability testing)
 
 Architecture:
   - MujocoSystem plugin loaded by controller_manager (lifecycle mode)
   - Viewer is integrated into plugin (enable via URDF parameter 'mujoco_viewer')
   - Plugin handles simulation stepping, services, clock publishing
-
-Example: IK controller demonstrates controller-agnostic design by forwarding to ROS native JTC
 
 Expected behavior:
   - Zero gravity environment (no falling)
@@ -182,8 +180,8 @@ def generate_launch_description():
         #   - zordi_joint_effort_grav_comp_controller: Pure gravity comp, no trajectory tracking
         #   - zordi_cartesian_effort_controller: Cartesian impedance control
         #   - zordi_cartesian_effort_rnea_controller: Cartesian control with full inverse dynamics
-        #   - zordi_cartesian_ik_controller: Cartesian IK that forwards to JTC
-        #   - joint_trajectory_controller: ROS native JTC (used by IK controller)
+        #   - zordi_cartesian_ik_controller: Cartesian IK that forwards to zordi_joint_effort_controller
+        #   - joint_trajectory_controller: ROS native JTC (for interoperability testing)
         load_joint_state_broadcaster,
         load_zordi_joint_effort_controller,
         load_zordi_joint_effort_rnea_controller,
