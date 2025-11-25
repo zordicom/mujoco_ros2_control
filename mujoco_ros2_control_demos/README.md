@@ -185,13 +185,13 @@ The controller claims position, velocity, and effort interfaces, triggering MIT 
 
 # Terminal 2: Switch from gravity comp controller to MIT controller
 # First, deactivate the gravity comp controller
-ros2 control set_controller_state zordi_grav_comp_controller inactive
+ros2 control set_controller_state zordi_joint_effort_grav_comp_controller inactive
 
 # Activate MIT controller
-ros2 control set_controller_state zordi_ros_controllers active
+ros2 control set_controller_state zordi_joint_mit_controller active
 
 # Send trajectory via action
-ros2 action send_goal /zordi_ros_controllers/follow_joint_trajectory \
+ros2 action send_goal /zordi_joint_mit_controller/follow_joint_trajectory \
   control_msgs/action/FollowJointTrajectory \
   "{trajectory: {joint_names: ['j1'], points: [{positions: [1.0], velocities: [0.0], time_from_start: {sec: 2}}]}}"
 ```
@@ -206,12 +206,12 @@ ros2 action send_goal /zordi_ros_controllers/follow_joint_trajectory \
 
 ```bash
 # Move to different positions
-ros2 action send_goal /zordi_ros_controllers/follow_joint_trajectory \
+ros2 action send_goal /zordi_joint_mit_controller/follow_joint_trajectory \
   control_msgs/action/FollowJointTrajectory \
   "{trajectory: {joint_names: ['j1'], points: [{positions: [-0.5], time_from_start: {sec: 1}}]}}"
 
 # Multi-point trajectory
-ros2 action send_goal /zordi_ros_controllers/follow_joint_trajectory \
+ros2 action send_goal /zordi_joint_mit_controller/follow_joint_trajectory \
   control_msgs/action/FollowJointTrajectory \
   "{trajectory: {joint_names: ['j1'], points: [{positions: [0.5], time_from_start: {sec: 1}}, {positions: [-0.5], time_from_start: {sec: 2}}, {positions: [0.0], time_from_start: {sec: 3}}]}}"
 ```

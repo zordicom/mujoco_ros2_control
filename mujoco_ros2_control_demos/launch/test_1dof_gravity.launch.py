@@ -4,8 +4,8 @@ Copyright 2025 Zordi, Inc. All rights reserved.
 Launch file for 1-DOF gravity compensation and MIT mode demonstrations.
 
 This test uses a VERTICAL pendulum with two controllers:
-  1. zordi_grav_comp_controller: Pure gravity compensation (no PD control - fully backdrivable)
-  2. zordi_ros_controllers: MIT mode with trajectory tracking and gravity compensation
+  1. zordi_joint_effort_grav_comp_controller: Pure gravity compensation (fully backdrivable)
+  2. zordi_joint_mit_controller: MIT mode with trajectory tracking and gravity compensation
 
 Architecture:
   - MujocoSystem plugin loaded by controller_manager (lifecycle mode)
@@ -13,11 +13,11 @@ Architecture:
   - Plugin handles simulation stepping, services, clock publishing
 
 Test objectives:
-  Example 1 (zordi_grav_comp_controller):
+  Example 1 (zordi_joint_effort_grav_comp_controller):
     - Verify pure gravity compensation without trajectory tracking
     - Pendulum holds upright and is fully backdrivable
 
-  Example 2 (zordi_ros_controllers):
+  Example 2 (zordi_joint_mit_controller):
     - Verify MIT mode with trajectory tracking
     - Send trajectories while maintaining gravity compensation
     - Smooth tracking with automatic hold after trajectory completion
@@ -77,11 +77,11 @@ def generate_launch_description():
         output="screen",
     )
 
-    load_zordi_grav_comp_controller = Node(
+    load_zordi_joint_effort_grav_comp_controller = Node(
         package="controller_manager",
         executable="spawner",
         arguments=[
-            "zordi_grav_comp_controller",
+            "zordi_joint_effort_grav_comp_controller",
             "-c",
             "/controller_manager",
             "--inactive",
@@ -89,11 +89,11 @@ def generate_launch_description():
         output="screen",
     )
 
-    load_zordi_ros_controllers = Node(
+    load_zordi_joint_mit_controller = Node(
         package="controller_manager",
         executable="spawner",
         arguments=[
-            "zordi_ros_controllers",
+            "zordi_joint_mit_controller",
             "-c",
             "/controller_manager",
             "--inactive",
@@ -120,11 +120,11 @@ def generate_launch_description():
         # Load controllers using spawner nodes
         # Spawner automatically waits for controller_manager to be ready
         # Both controllers are loaded in inactive state - activate manually:
-        #   - zordi_grav_comp_controller: For pure gravity compensation (Example 1)
-        #   - zordi_ros_controllers: For trajectory tracking with gravity comp (Example 2)
+        #   - zordi_joint_effort_grav_comp_controller: For pure gravity compensation (Example 1)
+        #   - zordi_joint_mit_controller: For trajectory tracking with gravity comp (Example 2)
         load_joint_state_broadcaster,
-        load_zordi_grav_comp_controller,
-        load_zordi_ros_controllers,
+        load_zordi_joint_effort_grav_comp_controller,
+        load_zordi_joint_mit_controller,
         # Reset to test_pose after controllers load (with small delay)
         RegisterEventHandler(
             event_handler=OnProcessStart(

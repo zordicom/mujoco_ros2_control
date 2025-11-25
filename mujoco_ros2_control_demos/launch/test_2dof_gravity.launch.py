@@ -3,13 +3,14 @@ Copyright 2025 Zordi, Inc. All rights reserved.
 
 Launch file for 2-DOF vertical double pendulum gravity compensation demonstrations.
 
-This test uses a VERTICAL double pendulum with 5 Zordi controllers + 1 ROS-native:
+This test uses a VERTICAL double pendulum with 6 Zordi controllers + 1 ROS-native:
   1. zordi_grav_comp_controller: Pure gravity compensation (backdrivable)
   2. zordi_joint_trajectory_controller: Joint space with gravity comp
   3. zordi_joint_mit_rnea_controller: Joint space with full inverse dynamics (MIT mode)
   4. zordi_cartesian_effort_controller: Cartesian impedance control
   5. zordi_cartesian_effort_rnea_controller: Cartesian with inverse dynamics
-  6. joint_trajectory_controller: ROS-native (for comparison)
+  6. zordi_cartesian_ik_controller: Cartesian IK with JTC execution
+  7. joint_trajectory_controller: ROS-native (for comparison)
 
 Test objectives:
   Example 1 (zordi_grav_comp_controller):
@@ -32,7 +33,12 @@ Test objectives:
     - Cartesian control with full inverse dynamics
     - Highest accuracy Cartesian tracking
 
-  Example 6 (joint_trajectory_controller):
+  Example 6 (zordi_cartesian_ik_controller):
+    - Cartesian IK with JTC execution
+    - Computes IK for Cartesian waypoints, sends to zordi_joint_trajectory_controller
+    - Requires both controllers active
+
+  Example 7 (joint_trajectory_controller):
     - ROS-native controller for comparison
     - No gravity compensation (will struggle)
 
@@ -172,6 +178,18 @@ def generate_launch_description():
         output="screen",
     )
 
+    load_zordi_cartesian_ik_controller = Node(
+        package="controller_manager",
+        executable="spawner",
+        arguments=[
+            "zordi_cartesian_ik_controller",
+            "-c",
+            "/controller_manager",
+            "--inactive",
+        ],
+        output="screen",
+    )
+
     # Reset to test_pose keyframe after controllers load
     reset_to_test_pose = ExecuteProcess(
         cmd=[
@@ -197,12 +215,13 @@ def generate_launch_description():
         controller_manager_node,
         robot_state_pub_node,
         # Load controllers when controller_manager starts
-        # All 6 controllers loaded in inactive state - activate manually:
+        # All 7 controllers loaded in inactive state - activate manually:
         #   - zordi_grav_comp_controller: Pure gravity compensation
         #   - zordi_joint_trajectory_controller: Joint space with gravity
         #   - zordi_joint_mit_rnea_controller: Joint space with RNEA (MIT mode)
         #   - zordi_cartesian_effort_controller: Cartesian with gravity comp
         #   - zordi_cartesian_effort_rnea_controller: Cartesian with RNEA
+        #   - zordi_cartesian_ik_controller: Cartesian IK (sends to JTC)
         #   - joint_trajectory_controller: ROS-native (no gravity comp)
         # Using spawner nodes - they automatically wait for controller_manager to be ready
         load_joint_state_broadcaster,
@@ -211,6 +230,7 @@ def generate_launch_description():
         load_zordi_joint_mit_rnea_controller,
         load_zordi_cartesian_effort_controller,
         load_zordi_cartesian_effort_rnea_controller,
+        load_zordi_cartesian_ik_controller,
         load_joint_trajectory_controller,
         # Reset to test_pose after controllers load (with small delay)
         RegisterEventHandler(

@@ -84,12 +84,13 @@ This launches:
 - 2-DOF vertical double pendulum
 - Robot state publisher
 - Joint state broadcaster (active)
-- Five Zordi controllers + one ROS-native (all inactive):
+- Six Zordi controllers + one ROS-native (all inactive):
   - `zordi_grav_comp_controller` - Pure gravity compensation
   - `zordi_joint_trajectory_controller` - Joint space with gravity comp
   - `zordi_joint_mit_rnea_controller` - Joint space with RNEA (MIT mode)
   - `zordi_cartesian_effort_controller` - Cartesian impedance
   - `zordi_cartesian_effort_rnea_controller` - Cartesian with RNEA
+  - `zordi_cartesian_ik_controller` - Cartesian IK with JTC execution
   - `joint_trajectory_controller` - ROS-native (no gravity comp)
 
 **Note:** The robot is reset to `test_pose` (q=[0.3, -0.2]) after launch via service call. This provides a configuration with some gravity torque to verify compensation is working.
@@ -134,6 +135,7 @@ ros2 control list_controllers
 #   zordi_joint_mit_rnea_controller    [inactive]
 #   zordi_cartesian_effort_controller         [inactive]
 #   zordi_cartesian_effort_rnea_controller    [inactive]
+#   zordi_cartesian_ik_controller      [inactive]
 #   joint_trajectory_controller        [inactive]
 
 # Monitor joint states
@@ -422,6 +424,126 @@ ros2 action send_goal /joint_trajectory_controller/follow_joint_trajectory \
 - Oscillations when activated (expected and normal)
 - Highlights critical value of gravity compensation
 
+### Test 6: Cartesian IK Controller
+
+**Objective:** Test Cartesian-to-joint trajectory conversion via IK solver.
+
+The `zordi_cartesian_ik_controller` computes inverse kinematics for Cartesian waypoints and sends the resulting joint trajectory to another controller (in this case, `zordi_joint_trajectory_controller`). This architecture provides:
+
+- Cartesian pose input interface
+- Numerical IK using Pinocchio (damped least-squares)
+- Gravity-compensated execution via the target JTC
+
+**Architecture:**
+
+```
+Cartesian Waypoints --> [IK Controller] --> Joint Trajectory --> [JTC] --> Robot
+```
+
+**Steps:**
+
+1. **First, deactivate any active controllers:**
+
+```bash
+ros2 control set_controller_state joint_trajectory_controller inactive
+```
+
+2. **Activate both the target JTC and IK controller:**
+
+```bash
+# Activate JTC first (it must be running to receive trajectories)
+ros2 control set_controller_state zordi_joint_trajectory_controller active
+
+# Then activate the IK controller
+ros2 control set_controller_state zordi_cartesian_ik_controller active
+```
+
+3. **Unpause simulation if needed:**
+
+```bash
+ros2 service call /mujoco_system/simulation_control \
+  mujoco_ros2_control_msgs/srv/SimulationControl "{command: 'unpause'}"
+```
+
+4. **Send a single target pose (straighten link2, move to q=[0.3, 0.0]):**
+
+```bash
+ros2 topic pub --once /zordi_cartesian_ik_controller/target_pose \
+  geometry_msgs/msg/PoseStamped "{
+    header: {frame_id: 'world'},
+    pose: {
+      position: {x: -0.30, y: 0.0, z: 0.54},
+      orientation: {w: 0.989, x: 0.0, y: 0.149, z: 0.0}
+    }
+  }"
+```
+
+5. **Observe the IK computation and execution:**
+   - Controller logs should show "Sent single pose IK result to JTC"
+   - Robot moves smoothly to the target configuration
+   - Joint trajectory is executed by `zordi_joint_trajectory_controller`
+
+6. **Send a Cartesian trajectory (swing motion):**
+
+```bash
+ros2 topic pub --once /zordi_cartesian_ik_controller/cartesian_trajectory \
+  moveit_msgs/msg/CartesianTrajectory "{
+    header: {frame_id: 'world'},
+    tracked_frame: 'ee_link',
+    points: [
+      {
+        point: {
+          pose: {
+            position: {x: -0.48, y: 0.0, z: 0.63},
+            orientation: {w: 0.969, x: 0.0, y: 0.248, z: 0.0}
+          }
+        },
+        time_from_start: {sec: 3}
+      },
+      {
+        point: {
+          pose: {
+            position: {x: 0.48, y: 0.0, z: 0.63},
+            orientation: {w: 0.969, x: 0.0, y: -0.248, z: 0.0}
+          }
+        },
+        time_from_start: {sec: 6}
+      },
+      {
+        point: {
+          pose: {
+            position: {x: -0.20, y: 0.0, z: 0.53},
+            orientation: {w: 0.999, x: 0.0, y: 0.050, z: 0.0}
+          }
+        },
+        time_from_start: {sec: 9}
+      }
+    ]
+  }"
+```
+
+7. **Observe trajectory execution:**
+   - IK computes joint positions for each Cartesian waypoint
+   - Controller logs show "Converted N Cartesian waypoints to joint trajectory"
+   - Joint trajectory is sent to JTC for execution
+   - Motion includes gravity compensation from the Zordi JTC
+
+**Key Differences from Direct Cartesian Controllers:**
+
+| Aspect | Cartesian IK Controller | Direct Cartesian Controllers |
+|--------|-------------------------|------------------------------|
+| Control mode | Position (via JTC) | Impedance (effort) |
+| Compliance | High stiffness (JTC PD) | Configurable compliance |
+| IK computation | At waypoint submission | Real-time at 1 kHz |
+| Use case | Path planning, high PD | Contact tasks, teleoperation |
+
+**Success Criteria:**
+
+- IK converges for all waypoints (check logs for errors)
+- Smooth trajectory execution via JTC
+- End-effector reaches target poses
+- No IK failures or large errors in logs
+
 ## Command Quick Reference
 
 ### Controller Management
@@ -509,6 +631,13 @@ ros2 topic echo /rosout | grep zordi
 - [x] RNEA controllers show improved tracking accuracy
 - [x] Lower error metrics compared to base controllers
 - [x] No additional instability introduced
+
+### Cartesian IK Controller
+
+- [x] IK converges for all waypoints
+- [x] Joint trajectory successfully sent to JTC
+- [x] Smooth execution with gravity compensation
+- [x] End-effector reaches target poses accurately
 
 ## Troubleshooting
 

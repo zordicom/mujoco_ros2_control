@@ -3,17 +3,21 @@ Copyright 2025 Zordi, Inc. All rights reserved.
 
 Launch file for 2-DOF planar arm controller demonstrations.
 
-This test uses a HORIZONTAL 2-link planar arm with five Zordi controllers:
-  1. zordi_ros_controllers: Gravity compensation and trajectory tracking (joint space)
-  2. zordi_mit_rnea_controller: Joint space control with full inverse dynamics (RNEA)
-  3. zordi_mit_gravity_controller: Pure gravity compensation, no trajectory tracking (fully backdrivable)
+This test uses a HORIZONTAL 2-link planar arm with seven controllers:
+  1. zordi_joint_effort_controller: Joint space trajectory tracking with software PD
+  2. zordi_joint_effort_rnea_controller: Joint space with full inverse dynamics (RNEA)
+  3. zordi_joint_effort_grav_comp_controller: Pure gravity compensation (fully backdrivable)
   4. zordi_cartesian_effort_controller: Cartesian impedance control
   5. zordi_cartesian_effort_rnea_controller: Cartesian control with full inverse dynamics (RNEA)
+  6. zordi_cartesian_ik_controller: Cartesian IK that forwards to JTC
+  7. joint_trajectory_controller: ROS native JTC (used by IK controller)
 
 Architecture:
   - MujocoSystem plugin loaded by controller_manager (lifecycle mode)
   - Viewer is integrated into plugin (enable via URDF parameter 'mujoco_viewer')
   - Plugin handles simulation stepping, services, clock publishing
+
+Example: IK controller demonstrates controller-agnostic design by forwarding to ROS native JTC
 
 Expected behavior:
   - Zero gravity environment (no falling)
@@ -70,11 +74,11 @@ def generate_launch_description():
         output="screen",
     )
 
-    load_zordi_ros_controllers = Node(
+    load_zordi_joint_effort_controller = Node(
         package="controller_manager",
         executable="spawner",
         arguments=[
-            "zordi_ros_controllers",
+            "zordi_joint_effort_controller",
             "-c",
             "/controller_manager",
             "--inactive",
@@ -94,11 +98,11 @@ def generate_launch_description():
         output="screen",
     )
 
-    load_zordi_mit_rnea_controller = Node(
+    load_zordi_joint_effort_rnea_controller = Node(
         package="controller_manager",
         executable="spawner",
         arguments=[
-            "zordi_mit_rnea_controller",
+            "zordi_joint_effort_rnea_controller",
             "-c",
             "/controller_manager",
             "--inactive",
@@ -118,11 +122,35 @@ def generate_launch_description():
         output="screen",
     )
 
-    load_zordi_mit_gravity_controller = Node(
+    load_zordi_joint_effort_grav_comp_controller = Node(
         package="controller_manager",
         executable="spawner",
         arguments=[
-            "zordi_mit_gravity_controller",
+            "zordi_joint_effort_grav_comp_controller",
+            "-c",
+            "/controller_manager",
+            "--inactive",
+        ],
+        output="screen",
+    )
+
+    load_zordi_cartesian_ik_controller = Node(
+        package="controller_manager",
+        executable="spawner",
+        arguments=[
+            "zordi_cartesian_ik_controller",
+            "-c",
+            "/controller_manager",
+            "--inactive",
+        ],
+        output="screen",
+    )
+
+    load_joint_trajectory_controller = Node(
+        package="controller_manager",
+        executable="spawner",
+        arguments=[
+            "joint_trajectory_controller",
             "-c",
             "/controller_manager",
             "--inactive",
@@ -148,18 +176,22 @@ def generate_launch_description():
         robot_state_pub_node,
         # Load controllers using spawner nodes
         # Spawner automatically waits for controller_manager to be ready
-        # All five controllers are loaded in inactive state - activate manually:
-        #   - zordi_ros_controllers: Joint space gravity comp and trajectory tracking
-        #   - zordi_mit_rnea_controller: Joint space with full inverse dynamics (RNEA)
-        #   - zordi_mit_gravity_controller: Pure gravity comp, no trajectory tracking
+        # All seven controllers are loaded in inactive state - activate manually:
+        #   - zordi_joint_effort_controller: Joint space trajectory tracking with software PD
+        #   - zordi_joint_effort_rnea_controller: Joint space with full inverse dynamics (RNEA)
+        #   - zordi_joint_effort_grav_comp_controller: Pure gravity comp, no trajectory tracking
         #   - zordi_cartesian_effort_controller: Cartesian impedance control
         #   - zordi_cartesian_effort_rnea_controller: Cartesian control with full inverse dynamics
+        #   - zordi_cartesian_ik_controller: Cartesian IK that forwards to JTC
+        #   - joint_trajectory_controller: ROS native JTC (used by IK controller)
         load_joint_state_broadcaster,
-        load_zordi_ros_controllers,
-        load_zordi_mit_rnea_controller,
-        load_zordi_mit_gravity_controller,
+        load_zordi_joint_effort_controller,
+        load_zordi_joint_effort_rnea_controller,
+        load_zordi_joint_effort_grav_comp_controller,
         load_zordi_cartesian_effort_controller,
         load_zordi_cartesian_effort_rnea_controller,
+        load_zordi_cartesian_ik_controller,
+        load_joint_trajectory_controller,
         # Reset to home after controllers load (with small delay)
         RegisterEventHandler(
             event_handler=OnProcessStart(

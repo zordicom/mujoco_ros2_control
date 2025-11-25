@@ -10,7 +10,7 @@ controller_manager:
     joint_state_broadcaster:
       type: joint_state_broadcaster/JointStateBroadcaster
 
-    zordi_grav_comp_controller:
+    zordi_joint_effort_grav_comp_controller:
       type: zordi_ros_controllers/ZordiJointController
 
     zordi_joint_mit_controller:
@@ -23,7 +23,7 @@ joint_state_broadcaster:
 # Zordi Gravity Compensation Only Controller
 # This controller ONLY applies gravity compensation torques (no PD control)
 # The pendulum will be backdrivable and hold position purely via gravity compensation
-zordi_grav_comp_controller:
+zordi_joint_effort_grav_comp_controller:
   ros__parameters:
     joints:
       - j1

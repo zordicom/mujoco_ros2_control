@@ -24,6 +24,12 @@ controller_manager:
     zordi_cartesian_effort_rnea_controller:
       type: zordi_ros_controllers/ZordiCartesianRNEAController
 
+    zordi_cartesian_ik_controller:
+      type: zordi_ros_controllers/ZordiCartesianIKController
+
+    joint_trajectory_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
 # Joint state broadcaster
 joint_state_broadcaster:
   ros__parameters:
@@ -207,3 +213,60 @@ zordi_joint_effort_grav_comp_controller:
     gravity_comp_only: true
     use_gravity_compensation: true  # Enable Pinocchio (gravity torques will be zero in zero-g)
     compute_pd_internally: false  # No PD needed in gravity comp only mode
+
+# Zordi Cartesian IK Controller (Cartesian to Joint via IK)
+zordi_cartesian_ik_controller:
+  ros__parameters:
+    joints:
+      - joint1
+      - joint2
+
+    # Does not claim command interfaces (forwards to JTC)
+    command_interfaces: []
+    state_interfaces:
+      - position
+      - velocity
+
+    # Frames
+    end_effector_frame: "ee_link"
+    base_frame: "base_link"
+
+    # Target JTC to forward commands to (any controller with FollowJointTrajectory action)
+    # Can be: zordi_joint_effort_controller, zordi_joint_mit_controller, 
+    #         joint_trajectory_controller (ROS native), etc.
+    target_controller: "joint_trajectory_controller"  # Using ROS native JTC
+
+    # IK solver parameters
+    ik:
+      max_iterations: 1000
+      tolerance: 1.0e-6
+      damping: 0.01  # Damped least squares
+
+    # Nullspace optimization (not used for 2-DOF, but configured)
+    nullspace:
+      stiffness: 5.0
+      weights: [1.0, 1.0]
+
+# ROS Native Joint Trajectory Controller (used by IK controller)
+joint_trajectory_controller:
+  ros__parameters:
+    joints:
+      - joint1
+      - joint2
+
+    command_interfaces:
+      - position
+      - velocity
+      - effort
+
+    state_interfaces:
+      - position
+      - velocity
+
+    # Action configuration
+    action_monitor_rate: 20.0  # Hz
+    
+    # Tolerances (used when goals specify tolerances)
+    constraints:
+      stopped_velocity_tolerance: 0.01  # rad/s
+      goal_time: 0.0  # Disabled (use per-goal tolerance)
