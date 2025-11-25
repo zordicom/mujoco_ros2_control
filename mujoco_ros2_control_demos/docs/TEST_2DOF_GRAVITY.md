@@ -87,7 +87,7 @@ This launches:
 - Five Zordi controllers + one ROS-native (all inactive):
   - `zordi_grav_comp_controller` - Pure gravity compensation
   - `zordi_joint_trajectory_controller` - Joint space with gravity comp
-  - `zordi_joint_rnea_controller` - Joint space with RNEA
+  - `zordi_joint_mit_rnea_controller` - Joint space with RNEA (MIT mode)
   - `zordi_cartesian_controller` - Cartesian impedance
   - `zordi_cartesian_rnea_controller` - Cartesian with RNEA
   - `joint_trajectory_controller` - ROS-native (no gravity comp)
@@ -131,7 +131,7 @@ ros2 control list_controllers
 #   joint_state_broadcaster            [active]
 #   zordi_grav_comp_controller         [inactive]
 #   zordi_joint_trajectory_controller  [inactive]
-#   zordi_joint_rnea_controller        [inactive]
+#   zordi_joint_mit_rnea_controller    [inactive]
 #   zordi_cartesian_controller         [inactive]
 #   zordi_cartesian_rnea_controller    [inactive]
 #   joint_trajectory_controller        [inactive]
@@ -322,14 +322,14 @@ ros2 topic pub --once /zordi_cartesian_controller/cartesian_trajectory \
 
 ```bash
 ros2 control switch_controllers \
-  --activate zordi_joint_rnea_controller \
+  --activate zordi_joint_mit_rnea_controller \
   --deactivate zordi_cartesian_controller
 ```
 
 2. **Send same trajectory as Test 2:**
 
 ```bash
-ros2 action send_goal /zordi_joint_rnea_controller/follow_joint_trajectory \
+ros2 action send_goal /zordi_joint_mit_rnea_controller/follow_joint_trajectory \
   control_msgs/action/FollowJointTrajectory "{
     trajectory: {
       joint_names: [joint1, joint2],
@@ -354,7 +354,7 @@ ros2 action send_goal /zordi_joint_rnea_controller/follow_joint_trajectory \
 ```bash
 ros2 control switch_controllers \
   --activate zordi_cartesian_rnea_controller \
-  --deactivate zordi_joint_rnea_controller
+  --deactivate zordi_joint_mit_rnea_controller
 ```
 
 2. **Send same Cartesian trajectory as Test 3**
@@ -634,7 +634,7 @@ ros2 run tf2_ros tf2_echo world ee_link
 
 **Joint Space Controllers:**
 
-| Feature | zordi_grav_comp_controller | zordi_joint_trajectory_controller | zordi_joint_rnea_controller |
+| Feature | zordi_grav_comp_controller | zordi_joint_trajectory_controller | zordi_joint_mit_rnea_controller |
 |---------|---------------------------|----------------------------------|----------------------------|
 | Trajectory tracking | ✗ | ✓ | ✓ |
 | Gravity compensation | ✓ | ✓ | ✓ |

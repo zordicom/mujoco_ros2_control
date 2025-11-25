@@ -10,13 +10,13 @@ controller_manager:
       type: joint_state_broadcaster/JointStateBroadcaster
 
     zordi_grav_comp_controller:
-      type: zordi_mit_controller/ZordiMITController
+      type: zordi_mit_controller/ZordiJointController
 
     zordi_joint_trajectory_controller:
-      type: zordi_mit_controller/ZordiMITController
+      type: zordi_mit_controller/ZordiJointController
 
-    zordi_joint_rnea_controller:
-      type: zordi_mit_controller/ZordiMITRNEAController
+    zordi_joint_mit_rnea_controller:
+      type: zordi_mit_controller/ZordiJointRNEAController
 
     zordi_cartesian_controller:
       type: zordi_mit_controller/ZordiCartesianController
@@ -91,8 +91,8 @@ zordi_joint_trajectory_controller:
       trajectory: 0.05
       goal: 0.05
 
-# Zordi Joint RNEA Controller (Full Inverse Dynamics)
-zordi_joint_rnea_controller:
+# Zordi Joint MIT RNEA Controller (Full Inverse Dynamics, MIT mode)
+zordi_joint_mit_rnea_controller:
   ros__parameters:
     joints:
       - joint1

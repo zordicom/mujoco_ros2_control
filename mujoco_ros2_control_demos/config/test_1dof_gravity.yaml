@@ -11,10 +11,10 @@ controller_manager:
       type: joint_state_broadcaster/JointStateBroadcaster
 
     zordi_grav_comp_controller:
-      type: zordi_mit_controller/ZordiMITController
+      type: zordi_mit_controller/ZordiJointController
 
-    zordi_mit_controller:
-      type: zordi_mit_controller/ZordiMITController
+    zordi_joint_mit_controller:
+      type: zordi_mit_controller/ZordiJointController
 
 joint_state_broadcaster:
   ros__parameters:
@@ -42,9 +42,9 @@ zordi_grav_comp_controller:
     # Enable gravity compensation (required)
     use_gravity_compensation: true
 
-# Zordi MIT Controller (for trajectory tracking with gravity compensation)
+# Zordi Joint MIT Controller (for trajectory tracking with gravity compensation)
 # This controller claims all three interfaces (position, velocity, effort) to enable MIT mode
-zordi_mit_controller:
+zordi_joint_mit_controller:
   ros__parameters:
     joints:
       - j1
