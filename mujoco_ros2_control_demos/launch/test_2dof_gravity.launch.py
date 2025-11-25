@@ -187,12 +187,12 @@ def generate_launch_description():
 
     return LaunchDescription([
         # Launch argument for viewer (integrated into MujocoSystem plugin via URDF parameter)
-        # Note: Viewer is now enabled/disabled via URDF <param name="enable_viewer">true/false</param>
+        # Note: Viewer is now enabled/disabled via URDF <param name="mujoco_viewer">true/false</param>
         # This launch argument is kept for backward compatibility but has no effect
         DeclareLaunchArgument(
             "show_viewer",
             default_value="false",
-            description="[DEPRECATED] Viewer is now controlled via URDF parameter 'enable_viewer'",
+            description="[DEPRECATED] Viewer is now controlled via URDF parameter 'mujoco_viewer'",
         ),
         controller_manager_node,
         robot_state_pub_node,

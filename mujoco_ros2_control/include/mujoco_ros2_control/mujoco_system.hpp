@@ -200,7 +200,7 @@ private:
   std::thread executor_thread_;
 
   // Viewer (optional)
-  bool enable_viewer_{false};
+  bool mujoco_viewer_{false};
   mujoco_ros2_control::MujocoRendering* rendering_{nullptr};
   std::thread viewer_thread_;
   std::atomic<bool> stop_viewer_{false};

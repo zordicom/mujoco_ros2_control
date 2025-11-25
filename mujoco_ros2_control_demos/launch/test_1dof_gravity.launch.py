@@ -9,7 +9,7 @@ This test uses a VERTICAL pendulum with two controllers:
 
 Architecture:
   - MujocoSystem plugin loaded by controller_manager (lifecycle mode)
-  - Viewer is integrated into plugin (enable via URDF parameter 'enable_viewer')
+  - Viewer is integrated into plugin (enable via URDF parameter 'mujoco_viewer')
   - Plugin handles simulation stepping, services, clock publishing
 
 Test objectives:

@@ -12,7 +12,7 @@ This test uses a HORIZONTAL 2-link planar arm with five Zordi controllers:
 
 Architecture:
   - MujocoSystem plugin loaded by controller_manager (lifecycle mode)
-  - Viewer is integrated into plugin (enable via URDF parameter 'enable_viewer')
+  - Viewer is integrated into plugin (enable via URDF parameter 'mujoco_viewer')
   - Plugin handles simulation stepping, services, clock publishing
 
 Expected behavior:

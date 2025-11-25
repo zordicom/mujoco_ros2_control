@@ -76,9 +76,9 @@ CallbackReturn MujocoSystem::on_init(const hardware_interface::HardwareInfo& inf
   }
 
   // Viewer configuration
-  auto viewer_it = info_.hardware_parameters.find("enable_viewer");
+  auto viewer_it = info_.hardware_parameters.find("mujoco_viewer");
   if (viewer_it != info_.hardware_parameters.end() && viewer_it->second == "true") {
-    enable_viewer_ = true;
+    mujoco_viewer_ = true;
     RCLCPP_INFO(logger_, "Interactive viewer will be enabled in on_configure()");
   }
 
@@ -181,7 +181,7 @@ CallbackReturn MujocoSystem::on_configure(const rclcpp_lifecycle::State& /* prev
   }
 
   // Initialize viewer if enabled (AFTER simple node creation - old working pattern)
-  if (enable_viewer_) {
+  if (mujoco_viewer_) {
     RCLCPP_INFO(logger_, "Starting interactive viewer thread...");
 
     // Start viewer thread - do ALL GLFW/OpenGL init inside thread for proper context handling
@@ -222,14 +222,17 @@ CallbackReturn MujocoSystem::on_configure(const rclcpp_lifecycle::State& /* prev
 CallbackReturn MujocoSystem::on_activate(const rclcpp_lifecycle::State& /* prev */) {
   RCLCPP_INFO(logger_, "Activating MujocoSystem...");
 
-  // Reset simulation
-  mj_resetData(mj_model_, mj_data_);
+  // Try to load initial keyframe if specified, otherwise reset to zero
+  if (!load_keyframe(info_)) {
+    // No keyframe loaded, reset to default state
+    mj_resetData(mj_model_, mj_data_);
 
-  // Sync commands with state
-  for (auto& joint : joint_states_) {
-    joint.position_command = mj_data_->qpos[joint.mj_pos_adr];
-    joint.velocity_command = 0.0;
-    joint.effort_command = 0.0;
+    // Sync commands with state
+    for (auto& joint : joint_states_) {
+      joint.position_command = mj_data_->qpos[joint.mj_pos_adr];
+      joint.velocity_command = 0.0;
+      joint.effort_command = 0.0;
+    }
   }
 
   // Start in PAUSED state (user must unpause via service)
@@ -470,6 +473,17 @@ hardware_interface::return_type MujocoSystem::write(
             double pos_err = joint_state.position_command - q;
             auto pos_gains = joint_state.position_pid.getGains();
             tau_pd += pos_gains.p_gain_ * pos_err;
+
+            // Debug: log MIT mode PD computation (throttled)
+            static int mit_debug_count = 0;
+            if (mit_debug_count % 10000 == 0 && joint_state.name.find("right_joint1") != std::string::npos)
+            {
+              RCLCPP_INFO(logger_,
+                "MIT PD [%s]: pos_cmd=%.3f, q=%.3f, err=%.3f, kp=%.1f, tau_pd=%.2f, tau_ff=%.2f",
+                joint_state.name.c_str(), joint_state.position_command, q, pos_err,
+                pos_gains.p_gain_, tau_pd, joint_state.effort_command);
+            }
+            mit_debug_count++;
           }
 
           // Velocity PD term (kd * velocity_error)
@@ -947,6 +961,14 @@ void MujocoSystem::register_joints(
     {
       last_joint_state.position_pid = get_pid_gains(joint, hardware_interface::HW_IF_POSITION);
       last_joint_state.velocity_pid = get_pid_gains(joint, hardware_interface::HW_IF_VELOCITY);
+
+      // Log loaded MIT mode gains
+      auto pos_gains = last_joint_state.position_pid.getGains();
+      auto vel_gains = last_joint_state.velocity_pid.getGains();
+      RCLCPP_INFO(
+        logger_,
+        "Joint '%s' MIT gains: kp=%.1f (stiffness), kd=%.1f (damping)",
+        joint.name.c_str(), pos_gains.p_gain_, vel_gains.p_gain_);
     }
   }
 }
@@ -1268,39 +1290,63 @@ control_toolbox::Pid MujocoSystem::get_pid_gains(
   const hardware_interface::ComponentInfo &joint_info, std::string command_interface)
 {
   double kp, ki, kd, i_max, i_min;
-  std::string key;
-  key = command_interface + std::string(PARAM_KP);
-  if (joint_info.parameters.find(key) != joint_info.parameters.end())
+
+  // MIT mode uses unified 'kp' and 'kd' parameters:
+  //   kp = stiffness (Kp), used by position interface
+  //   kd = damping (Kd), used by velocity interface
+
+  // Debug: log all available parameters for this joint
+  if (command_interface == "position")
   {
-    kp = std::stod(joint_info.parameters.at(key));
+    std::stringstream params_ss;
+    params_ss << "Joint '" << joint_info.name << "' parameters: ";
+    for (const auto& p : joint_info.parameters)
+    {
+      params_ss << p.first << "=" << p.second << ", ";
+    }
+    RCLCPP_INFO(logger_, "%s", params_ss.str().c_str());
+  }
+
+  // Check for deprecated parameter names and error out
+  if (joint_info.parameters.find("position_kp") != joint_info.parameters.end() ||
+      joint_info.parameters.find("velocity_kp") != joint_info.parameters.end())
+  {
+    RCLCPP_ERROR(
+      logger_,
+      "Joint '%s': DEPRECATED parameters 'position_kp'/'velocity_kp' found. "
+      "Use 'kp' (stiffness) and 'kd' (damping) instead.",
+      joint_info.name.c_str());
+  }
+
+  if (command_interface == "position")
+  {
+    // Position interface uses Kp (stiffness)
+    bool has_kp = joint_info.parameters.find("kp") != joint_info.parameters.end();
+    kp = has_kp ? std::stod(joint_info.parameters.at("kp")) : 0.0;
+    RCLCPP_INFO(logger_, "Joint '%s' position: kp=%s -> %.1f",
+      joint_info.name.c_str(), has_kp ? "found" : "NOT FOUND", kp);
+  }
+  else if (command_interface == "velocity")
+  {
+    // Velocity interface uses Kd (damping) - stored in p_gain slot of PID
+    bool has_kd = joint_info.parameters.find("kd") != joint_info.parameters.end();
+    kp = has_kd ? std::stod(joint_info.parameters.at("kd")) : 0.0;
+    RCLCPP_INFO(logger_, "Joint '%s' velocity: kd=%s -> %.1f",
+      joint_info.name.c_str(), has_kd ? "found" : "NOT FOUND", kp);
   }
   else
   {
+    // Other interfaces (effort, etc.): no PID gains needed
     kp = 0.0;
   }
 
-  key = command_interface + std::string(PARAM_KI);
-  if (joint_info.parameters.find(key) != joint_info.parameters.end())
-  {
-    ki = std::stod(joint_info.parameters.at(key));
-  }
-  else
-  {
-    ki = 0.0;
-  }
+  // ki and kd of the PID controller are not used in MIT mode
+  ki = 0.0;
+  kd = 0.0;
 
-  key = command_interface + std::string(PARAM_KD);
-  if (joint_info.parameters.find(key) != joint_info.parameters.end())
-  {
-    kd = std::stod(joint_info.parameters.at(key));
-  }
-  else
-  {
-    kd = 0.0;
-  }
-
+  // Anti-windup limits (rarely used in MIT mode, but keep for compatibility)
   bool enable_anti_windup = false;
-  key = command_interface + std::string(PARAM_I_MAX);
+  std::string key = command_interface + std::string(PARAM_I_MAX);
   if (joint_info.parameters.find(key) != joint_info.parameters.end())
   {
     i_max = std::stod(joint_info.parameters.at(key));

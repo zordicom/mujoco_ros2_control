@@ -13,7 +13,7 @@ The `test_2dof_gravity` example features a vertical double pendulum where q=[0, 
 This demo uses the unified lifecycle architecture:
 
 - **Simulation:** MujocoSystem plugin loaded by controller_manager
-- **Visualization:** Integrated MuJoCo viewer (enabled via URDF `enable_viewer` parameter)
+- **Visualization:** Integrated MuJoCo viewer (enabled via URDF `mujoco_viewer` parameter)
 - **Control:** Plugin steps simulation in `write()` method (1000 Hz)
 - **Services:** Accessible at `/mujoco_system/*`
 
@@ -101,7 +101,7 @@ ros2 service call /mujoco_system/simulation_control \
   mujoco_ros2_control_msgs/srv/SimulationControl "{command: 'unpause'}"
 ```
 
-**Viewer Control:** The viewer is enabled/disabled via URDF parameter `enable_viewer` (default: true for this demo). To disable, edit `test_2dof_gravity.xacro.urdf`.
+**Viewer Control:** The viewer is enabled/disabled via URDF parameter `mujoco_viewer` (default: true for this demo). To disable, edit `test_2dof_gravity.xacro.urdf`.
 
 **Available keyframes** (defined in MuJoCo XML, loaded via service):
 

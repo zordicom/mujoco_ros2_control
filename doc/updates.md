@@ -95,7 +95,7 @@ Enable in URDF hardware parameters:
   <plugin>mujoco_ros2_control/MujocoSystem</plugin>
   <param name="mujoco_model">models/robot.xml</param>
   <param name="mujoco_model_package">my_robot_description</param>
-  <param name="enable_viewer">true</param>  <!-- Enable interactive viewer -->
+  <param name="mujoco_viewer">true</param>  <!-- Enable interactive viewer -->
 </hardware>
 ```
 
@@ -137,7 +137,7 @@ Enable in URDF hardware parameters:
 |-----------|------|---------|-------------|
 | `mujoco_model` | string | required | Relative path to MuJoCo XML model |
 | `mujoco_model_package` | string | required | ROS package containing model |
-| `enable_viewer` | bool | false | Enable interactive MuJoCo viewer |
+| `mujoco_viewer` | bool | false | Enable interactive MuJoCo viewer |
 | `enable_cameras` | bool | false | Enable camera image publishing |
 | `camera_publish_rate` | double | 6.0 | Camera update rate (Hz) |
 
@@ -319,7 +319,7 @@ When PAUSED:
 <plugin>mujoco_ros2_control/MujocoSystem</plugin>
 <param name="mujoco_model">${mujoco_model}</param>
 <param name="mujoco_model_package">${mujoco_model_package}</param>
-<param name="enable_viewer">true</param>  <!-- Optional -->
+<param name="mujoco_viewer">true</param>  <!-- Optional -->
 ```
 
 ### From Old mujoco_ros2_control (Mode 2)
@@ -423,7 +423,7 @@ Controllers are loaded automatically via spawner. Simulation starts PAUSED.
 - `mujoco_system.cpp` - Added integrated viewer support
 - `CMakeLists.txt` - Linked GLFW to plugin, removed viewer executable
 - Launch files - Updated to use spawner for controller loading
-- URDFs - Added `enable_viewer` parameter
+- URDFs - Added `mujoco_viewer` parameter
 
 ### 2025-11: Actuator-Centric Control
 

@@ -42,7 +42,7 @@
       <plugin>mujoco_ros2_control/MujocoSystem</plugin>
       <param name="mujoco_model">mujoco_models/test_1dof_gravity.xml</param>
       <param name="mujoco_model_package">mujoco_ros2_control_demos</param>
-      <param name="enable_viewer">true</param>
+      <param name="mujoco_viewer">true</param>
     </hardware>
     <joint name="j1">
       <command_interface name="position"/>
