@@ -88,8 +88,8 @@ This launches:
   - `zordi_grav_comp_controller` - Pure gravity compensation
   - `zordi_joint_trajectory_controller` - Joint space with gravity comp
   - `zordi_joint_mit_rnea_controller` - Joint space with RNEA (MIT mode)
-  - `zordi_cartesian_controller` - Cartesian impedance
-  - `zordi_cartesian_rnea_controller` - Cartesian with RNEA
+  - `zordi_cartesian_effort_controller` - Cartesian impedance
+  - `zordi_cartesian_effort_rnea_controller` - Cartesian with RNEA
   - `joint_trajectory_controller` - ROS-native (no gravity comp)
 
 **Note:** The robot is reset to `test_pose` (q=[0.3, -0.2]) after launch via service call. This provides a configuration with some gravity torque to verify compensation is working.
@@ -132,8 +132,8 @@ ros2 control list_controllers
 #   zordi_grav_comp_controller         [inactive]
 #   zordi_joint_trajectory_controller  [inactive]
 #   zordi_joint_mit_rnea_controller    [inactive]
-#   zordi_cartesian_controller         [inactive]
-#   zordi_cartesian_rnea_controller    [inactive]
+#   zordi_cartesian_effort_controller         [inactive]
+#   zordi_cartesian_effort_rnea_controller    [inactive]
 #   joint_trajectory_controller        [inactive]
 
 # Monitor joint states
@@ -230,7 +230,7 @@ ros2 action send_goal /zordi_joint_trajectory_controller/follow_joint_trajectory
 
 ```bash
 ros2 control switch_controllers \
-  --activate zordi_cartesian_controller \
+  --activate zordi_cartesian_effort_controller \
   --deactivate zordi_joint_trajectory_controller
 ```
 
@@ -243,7 +243,7 @@ ros2 control switch_controllers \
 3. **Send a target pose to straighten link2 (move to q=[0.3, 0.0]):**
 
 ```bash
-ros2 topic pub --once /zordi_cartesian_controller/target_pose \
+ros2 topic pub --once /zordi_cartesian_effort_controller/target_pose \
   geometry_msgs/msg/PoseStamped "{
     header: {frame_id: 'world'},
     pose: {
@@ -263,7 +263,7 @@ ros2 topic pub --once /zordi_cartesian_controller/target_pose \
 5. **Send Cartesian trajectory (swing backward and forward):**
 
 ```bash
-ros2 topic pub --once /zordi_cartesian_controller/cartesian_trajectory \
+ros2 topic pub --once /zordi_cartesian_effort_controller/cartesian_trajectory \
   moveit_msgs/msg/CartesianTrajectory "{
     header: {frame_id: 'world'},
     tracked_frame: 'ee_link',
@@ -323,7 +323,7 @@ ros2 topic pub --once /zordi_cartesian_controller/cartesian_trajectory \
 ```bash
 ros2 control switch_controllers \
   --activate zordi_joint_mit_rnea_controller \
-  --deactivate zordi_cartesian_controller
+  --deactivate zordi_cartesian_effort_controller
 ```
 
 2. **Send same trajectory as Test 2:**
@@ -353,7 +353,7 @@ ros2 action send_goal /zordi_joint_mit_rnea_controller/follow_joint_trajectory \
 
 ```bash
 ros2 control switch_controllers \
-  --activate zordi_cartesian_rnea_controller \
+  --activate zordi_cartesian_effort_rnea_controller \
   --deactivate zordi_joint_mit_rnea_controller
 ```
 
@@ -381,7 +381,7 @@ ros2 control switch_controllers \
 ```bash
 ros2 control switch_controllers \
   --activate joint_trajectory_controller \
-  --deactivate zordi_cartesian_rnea_controller
+  --deactivate zordi_cartesian_effort_rnea_controller
 ```
 
 2. **Send same trajectory as Test 2:**
@@ -646,7 +646,7 @@ ros2 run tf2_ros tf2_echo world ee_link
 
 **Cartesian Space Controllers:**
 
-| Feature | zordi_cartesian_controller | zordi_cartesian_rnea_controller |
+| Feature | zordi_cartesian_effort_controller | zordi_cartesian_effort_rnea_controller |
 |---------|---------------------------|--------------------------------|
 | Gravity compensation | ✓ | ✓ |
 | Task-space impedance | ✓ | ✓ |

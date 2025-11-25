@@ -7,8 +7,8 @@ This test uses a VERTICAL double pendulum with 5 Zordi controllers + 1 ROS-nativ
   1. zordi_grav_comp_controller: Pure gravity compensation (backdrivable)
   2. zordi_joint_trajectory_controller: Joint space with gravity comp
   3. zordi_joint_mit_rnea_controller: Joint space with full inverse dynamics (MIT mode)
-  4. zordi_cartesian_controller: Cartesian impedance control
-  5. zordi_cartesian_rnea_controller: Cartesian with inverse dynamics
+  4. zordi_cartesian_effort_controller: Cartesian impedance control
+  5. zordi_cartesian_effort_rnea_controller: Cartesian with inverse dynamics
   6. joint_trajectory_controller: ROS-native (for comparison)
 
 Test objectives:
@@ -24,11 +24,11 @@ Test objectives:
     - Joint space with full inverse dynamics (RNEA) in MIT mode
     - Improved tracking accuracy with feedforward dynamics
 
-  Example 4 (zordi_cartesian_controller):
+  Example 4 (zordi_cartesian_effort_controller):
     - Cartesian impedance control with gravity compensation
     - End-effector pose tracking in vertical plane
 
-  Example 5 (zordi_cartesian_rnea_controller):
+  Example 5 (zordi_cartesian_effort_rnea_controller):
     - Cartesian control with full inverse dynamics
     - Highest accuracy Cartesian tracking
 
@@ -136,11 +136,11 @@ def generate_launch_description():
         output="screen",
     )
 
-    load_zordi_cartesian_controller = Node(
+    load_zordi_cartesian_effort_controller = Node(
         package="controller_manager",
         executable="spawner",
         arguments=[
-            "zordi_cartesian_controller",
+            "zordi_cartesian_effort_controller",
             "-c",
             "/controller_manager",
             "--inactive",
@@ -148,11 +148,11 @@ def generate_launch_description():
         output="screen",
     )
 
-    load_zordi_cartesian_rnea_controller = Node(
+    load_zordi_cartesian_effort_rnea_controller = Node(
         package="controller_manager",
         executable="spawner",
         arguments=[
-            "zordi_cartesian_rnea_controller",
+            "zordi_cartesian_effort_rnea_controller",
             "-c",
             "/controller_manager",
             "--inactive",
@@ -201,16 +201,16 @@ def generate_launch_description():
         #   - zordi_grav_comp_controller: Pure gravity compensation
         #   - zordi_joint_trajectory_controller: Joint space with gravity
         #   - zordi_joint_mit_rnea_controller: Joint space with RNEA (MIT mode)
-        #   - zordi_cartesian_controller: Cartesian with gravity comp
-        #   - zordi_cartesian_rnea_controller: Cartesian with RNEA
+        #   - zordi_cartesian_effort_controller: Cartesian with gravity comp
+        #   - zordi_cartesian_effort_rnea_controller: Cartesian with RNEA
         #   - joint_trajectory_controller: ROS-native (no gravity comp)
         # Using spawner nodes - they automatically wait for controller_manager to be ready
         load_joint_state_broadcaster,
         load_zordi_grav_comp_controller,
         load_zordi_joint_trajectory_controller,
         load_zordi_joint_mit_rnea_controller,
-        load_zordi_cartesian_controller,
-        load_zordi_cartesian_rnea_controller,
+        load_zordi_cartesian_effort_controller,
+        load_zordi_cartesian_effort_rnea_controller,
         load_joint_trajectory_controller,
         # Reset to test_pose after controllers load (with small delay)
         RegisterEventHandler(

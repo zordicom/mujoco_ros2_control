@@ -18,10 +18,10 @@ controller_manager:
     zordi_joint_mit_rnea_controller:
       type: zordi_mit_controller/ZordiJointRNEAController
 
-    zordi_cartesian_controller:
+    zordi_cartesian_effort_controller:
       type: zordi_mit_controller/ZordiCartesianController
 
-    zordi_cartesian_rnea_controller:
+    zordi_cartesian_effort_rnea_controller:
       type: zordi_mit_controller/ZordiCartesianRNEAController
 
     joint_trajectory_controller:
@@ -128,7 +128,7 @@ zordi_joint_mit_rnea_controller:
       goal: 0.05
 
 # Zordi Cartesian Controller
-zordi_cartesian_controller:
+zordi_cartesian_effort_controller:
   ros__parameters:
     joints:
       - joint1
@@ -188,7 +188,7 @@ zordi_cartesian_controller:
     max_cartesian_acceleration: 5.0  # m/s²
 
 # Zordi Cartesian RNEA Controller (with full inverse dynamics)
-zordi_cartesian_rnea_controller:
+zordi_cartesian_effort_rnea_controller:
   ros__parameters:
     joints:
       - joint1

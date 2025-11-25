@@ -33,7 +33,7 @@ class CartesianTest(Node):
 
         # Publisher for target pose
         self.pose_pub = self.create_publisher(
-            PoseStamped, "/zordi_cartesian_controller/target_pose", 10
+            PoseStamped, "/zordi_cartesian_effort_controller/target_pose", 10
         )
 
         # Subscriber for joint states

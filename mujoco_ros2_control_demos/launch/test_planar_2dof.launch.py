@@ -7,8 +7,8 @@ This test uses a HORIZONTAL 2-link planar arm with five Zordi controllers:
   1. zordi_mit_controller: Gravity compensation and trajectory tracking (joint space)
   2. zordi_mit_rnea_controller: Joint space control with full inverse dynamics (RNEA)
   3. zordi_mit_gravity_controller: Pure gravity compensation, no trajectory tracking (fully backdrivable)
-  4. zordi_cartesian_controller: Cartesian impedance control
-  5. zordi_cartesian_rnea_controller: Cartesian control with full inverse dynamics (RNEA)
+  4. zordi_cartesian_effort_controller: Cartesian impedance control
+  5. zordi_cartesian_effort_rnea_controller: Cartesian control with full inverse dynamics (RNEA)
 
 Architecture:
   - MujocoSystem plugin loaded by controller_manager (lifecycle mode)
@@ -82,11 +82,11 @@ def generate_launch_description():
         output="screen",
     )
 
-    load_zordi_cartesian_controller = Node(
+    load_zordi_cartesian_effort_controller = Node(
         package="controller_manager",
         executable="spawner",
         arguments=[
-            "zordi_cartesian_controller",
+            "zordi_cartesian_effort_controller",
             "-c",
             "/controller_manager",
             "--inactive",
@@ -106,11 +106,11 @@ def generate_launch_description():
         output="screen",
     )
 
-    load_zordi_cartesian_rnea_controller = Node(
+    load_zordi_cartesian_effort_rnea_controller = Node(
         package="controller_manager",
         executable="spawner",
         arguments=[
-            "zordi_cartesian_rnea_controller",
+            "zordi_cartesian_effort_rnea_controller",
             "-c",
             "/controller_manager",
             "--inactive",
@@ -152,14 +152,14 @@ def generate_launch_description():
         #   - zordi_mit_controller: Joint space gravity comp and trajectory tracking
         #   - zordi_mit_rnea_controller: Joint space with full inverse dynamics (RNEA)
         #   - zordi_mit_gravity_controller: Pure gravity comp, no trajectory tracking
-        #   - zordi_cartesian_controller: Cartesian impedance control
-        #   - zordi_cartesian_rnea_controller: Cartesian control with full inverse dynamics
+        #   - zordi_cartesian_effort_controller: Cartesian impedance control
+        #   - zordi_cartesian_effort_rnea_controller: Cartesian control with full inverse dynamics
         load_joint_state_broadcaster,
         load_zordi_mit_controller,
         load_zordi_mit_rnea_controller,
         load_zordi_mit_gravity_controller,
-        load_zordi_cartesian_controller,
-        load_zordi_cartesian_rnea_controller,
+        load_zordi_cartesian_effort_controller,
+        load_zordi_cartesian_effort_rnea_controller,
         # Reset to home after controllers load (with small delay)
         RegisterEventHandler(
             event_handler=OnProcessStart(

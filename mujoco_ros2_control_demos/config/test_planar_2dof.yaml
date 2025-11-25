@@ -18,10 +18,10 @@ controller_manager:
     zordi_joint_effort_grav_comp_controller:
       type: zordi_mit_controller/ZordiJointController
 
-    zordi_cartesian_controller:
+    zordi_cartesian_effort_controller:
       type: zordi_mit_controller/ZordiCartesianController
 
-    zordi_cartesian_rnea_controller:
+    zordi_cartesian_effort_rnea_controller:
       type: zordi_mit_controller/ZordiCartesianRNEAController
 
 # Joint state broadcaster
@@ -49,7 +49,7 @@ zordi_joint_effort_controller:
     compute_pd_internally: true  # Use software PD (loads gains from URDF)
 
 # Zordi Cartesian Controller
-zordi_cartesian_controller:
+zordi_cartesian_effort_controller:
   ros__parameters:
     joints:
       - joint1
@@ -111,7 +111,7 @@ zordi_cartesian_controller:
     max_cartesian_acceleration: 5.0  # m/s²
 
 # Zordi Cartesian RNEA Controller (with full inverse dynamics)
-zordi_cartesian_rnea_controller:
+zordi_cartesian_effort_rnea_controller:
   ros__parameters:
     joints:
       - joint1
