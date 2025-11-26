@@ -96,8 +96,8 @@ Gravity compensation allows the robot to hold any configuration and track trajec
       <plugin>mujoco_ros2_control/MujocoSystem</plugin>
       <param name="mujoco_model">mujoco_models/test_2dof_gravity.xml</param>
       <param name="mujoco_model_package">mujoco_ros2_control_demos</param>
-      <!-- Optional: enable interactive MuJoCo viewer (default: false) -->
-      <param name="mujoco_viewer">true</param>
+      <!-- Disable viewer for headless testing -->
+      <param name="mujoco_viewer">false</param>
     </hardware>
 
     <joint name="joint1">
@@ -108,10 +108,7 @@ Gravity compensation allows the robot to hold any configuration and track trajec
       <state_interface name="velocity"/>
       <state_interface name="effort"/>
 
-      <!-- Hardware PD gains for MuJoCo MIT mode (position/velocity actuators) -->
-      <param name="position_kp">100.0</param>
-      <param name="velocity_kp">10.0</param>
-      <!-- Software PD gains for Cartesian controller (when compute_pd_internally=true) -->
+      <!-- PD gains for MuJoCo actuators -->
       <param name="kp">100.0</param>
       <param name="kd">10.0</param>
     </joint>
@@ -124,10 +121,7 @@ Gravity compensation allows the robot to hold any configuration and track trajec
       <state_interface name="velocity"/>
       <state_interface name="effort"/>
 
-      <!-- Hardware PD gains for MuJoCo MIT mode (position/velocity actuators) -->
-      <param name="position_kp">50.0</param>
-      <param name="velocity_kp">5.0</param>
-      <!-- Software PD gains for Cartesian controller (when compute_pd_internally=true) -->
+      <!-- PD gains for MuJoCo actuators -->
       <param name="kp">50.0</param>
       <param name="kd">5.0</param>
     </joint>

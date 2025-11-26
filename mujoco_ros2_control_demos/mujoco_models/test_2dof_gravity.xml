@@ -6,7 +6,8 @@ MuJoCo model for 2-DOF vertical double pendulum with gravity compensation testin
 <mujoco model="test_2dof_gravity">
   <compiler angle="radian" meshdir="." autolimits="true"/>
 
-  <option timestep="0.001" gravity="0 0 -9.81"/>
+  <!-- TEMP: gravity disabled for IK debugging -->
+  <option timestep="0.001" gravity="0 0 0"/>
 
   <!-- Keyframes for testing different initial poses -->
   <keyframe>

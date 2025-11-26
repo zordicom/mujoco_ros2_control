@@ -1,23 +1,31 @@
 """
 Copyright 2025 Zordi, Inc. All rights reserved.
 
-Automated launch file for debugging Cartesian IK controller.
+Automated launch file for debugging Cartesian IK controller with GRAVITY.
 
-This test uses the simpler planar_2dof (no gravity) with ROS native JTC.
+This test uses the 2-DOF vertical double pendulum (with gravity) and
+zordi_joint_mit_controller (which has gravity compensation).
+
+Vertical pendulum kinematics (Y-axis rotation):
+  - Joint 1 at (0, 0, 1.5) in world frame
+  - Link 1: 0.5m, hangs downward (-Z)
+  - Link 2: 0.5m, hangs from end of link1
+  - q=[0, 0] = natural hanging configuration
 
 Test waypoints (FK-computed from joint configurations):
-  q=[0.30, -0.20] -> EE at (0.9752, 0.1977, 0), quat(w=0.9988, z=0.0500)
-  q=[0.35, -0.25] -> EE at (0.9672, 0.2214, 0), quat(w=0.9988, z=0.0500)
-  q=[0.40, -0.30] -> EE at (0.9581, 0.2446, 0), quat(w=0.9988, z=0.0500)
+  NOTE: Positive Y rotation swings pendulum in -X direction!
+  q=[0.30, -0.20] -> EE at (-0.1977, 0, 0.5248), quat(w=0.9988, y=0.0500)
+  q=[0.35, -0.25] -> EE at (-0.2214, 0, 0.5328), quat(w=0.9988, y=0.0500)
+  q=[0.40, -0.30] -> EE at (-0.2446, 0, 0.5420), quat(w=0.9988, y=0.0500)
 
 Launch sequence:
-  1. Start controller manager with planar_2dof robot
-  2. Load controllers: joint_state_broadcaster, joint_trajectory_controller, IK
-  3. Activate target JTC (joint_trajectory_controller)
+  1. Start controller manager with 2dof_gravity robot
+  2. Load controllers: joint_state_broadcaster, zordi_joint_mit_controller, IK
+  3. Activate target JTC (zordi_joint_mit_controller - has gravity comp)
   4. Activate IK controller (zordi_cartesian_ik_controller)
-  5. Reset robot to home keyframe
+  5. Reset robot to test_pose keyframe (q=[0.3, -0.2])
   6. Unpause simulation
-  7. Send test Cartesian trajectory (3 waypoints)
+  7. Send test Cartesian trajectory (3 waypoints in XZ plane)
 
 Usage:
   ros2 launch mujoco_ros2_control_demos test_cartesian_ik.launch.py
@@ -41,12 +49,12 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
-    """Generate automated launch description for IK controller testing."""
+    """Generate automated launch description for IK controller testing with gravity."""
     pkg_share = Path(get_package_share_directory("mujoco_ros2_control_demos"))
 
-    # Use planar_2dof (no gravity, simpler debugging)
-    urdf_file = pkg_share / "urdf" / "planar_2dof.xacro.urdf"
-    controller_config = pkg_share / "config" / "test_planar_2dof.yaml"
+    # Use 2-DOF vertical double pendulum with gravity
+    urdf_file = pkg_share / "urdf" / "test_2dof_gravity.xacro.urdf"
+    controller_config = pkg_share / "config" / "test_2dof_gravity.yaml"
 
     # Read URDF
     robot_description = Path(urdf_file).read_text(encoding="utf-8")
@@ -78,7 +86,7 @@ def generate_launch_description():
         output="screen",
     )
 
-    # Load ROS native JTC (position interface)
+    # Load ROS native joint_trajectory_controller (position interface)
     load_joint_trajectory_controller = Node(
         package="controller_manager",
         executable="spawner",
@@ -91,7 +99,7 @@ def generate_launch_description():
         output="screen",
     )
 
-    # Load IK controller (forwards to joint_trajectory_controller)
+    # Load IK controller (forwards to zordi_joint_mit_controller)
     load_zordi_cartesian_ik_controller = Node(
         package="controller_manager",
         executable="spawner",
@@ -127,15 +135,15 @@ def generate_launch_description():
         output="screen",
     )
 
-    # === Step 3: Reset to home keyframe ===
-    reset_to_home = ExecuteProcess(
+    # === Step 3: Reset to test_pose keyframe (q=[0.3, -0.2]) ===
+    reset_to_test_pose = ExecuteProcess(
         cmd=[
             "ros2",
             "service",
             "call",
             "/mujoco_system/reset_to_keyframe",
             "mujoco_ros2_control_msgs/srv/ResetToKeyframe",
-            "{keyframe: 'home'}",
+            "{keyframe: 'test_pose'}",
         ],
         output="screen",
     )
@@ -154,8 +162,11 @@ def generate_launch_description():
     )
 
     # === Step 5: Send test Cartesian trajectory ===
-    # FK-computed waypoints from q=[0.30,-0.20], [0.35,-0.25], [0.40,-0.30]
-    # All have same EE orientation (q1+q2 = 0.1 rad about Z)
+    # FK-computed waypoints for vertical pendulum (XZ plane, Y-axis rotation):
+    # NOTE: Positive Y rotation swings pendulum in -X direction!
+    #   q=[0.30, -0.20] -> (-0.1977, 0, 0.5248), quat(w=0.9988, y=0.0500)
+    #   q=[0.35, -0.25] -> (-0.2214, 0, 0.5328), quat(w=0.9988, y=0.0500)
+    #   q=[0.40, -0.30] -> (-0.2446, 0, 0.5420), quat(w=0.9988, y=0.0500)
     send_test_trajectory = ExecuteProcess(
         cmd=[
             "ros2",
@@ -165,14 +176,14 @@ def generate_launch_description():
             "/zordi_cartesian_ik_controller/cartesian_trajectory",
             "moveit_msgs/msg/CartesianTrajectory",
             """{
-                header: {frame_id: 'base_link'},
+                header: {frame_id: 'world'},
                 tracked_frame: 'ee_link',
                 points: [
                     {
                         point: {
                             pose: {
-                                position: {x: 0.9752, y: 0.1977, z: 0.0},
-                                orientation: {w: 0.9988, x: 0.0, y: 0.0, z: 0.0500}
+                                position: {x: -0.1977, y: 0.0, z: 0.5248},
+                                orientation: {w: 0.9988, x: 0.0, y: 0.0500, z: 0.0}
                             }
                         },
                         time_from_start: {sec: 2}
@@ -180,8 +191,8 @@ def generate_launch_description():
                     {
                         point: {
                             pose: {
-                                position: {x: 0.9672, y: 0.2214, z: 0.0},
-                                orientation: {w: 0.9988, x: 0.0, y: 0.0, z: 0.0500}
+                                position: {x: -0.2214, y: 0.0, z: 0.5328},
+                                orientation: {w: 0.9988, x: 0.0, y: 0.0500, z: 0.0}
                             }
                         },
                         time_from_start: {sec: 4}
@@ -189,8 +200,8 @@ def generate_launch_description():
                     {
                         point: {
                             pose: {
-                                position: {x: 0.9581, y: 0.2446, z: 0.0},
-                                orientation: {w: 0.9988, x: 0.0, y: 0.0, z: 0.0500}
+                                position: {x: -0.2446, y: 0.0, z: 0.5420},
+                                orientation: {w: 0.9988, x: 0.0, y: 0.0500, z: 0.0}
                             }
                         },
                         time_from_start: {sec: 6}
@@ -216,7 +227,7 @@ def generate_launch_description():
         load_joint_trajectory_controller,
         load_zordi_cartesian_ik_controller,
         # Chain of events after controllers load:
-        # 1. After IK controller loads -> activate target JTC
+        # 1. After IK controller loads -> activate target JTC (with gravity comp)
         RegisterEventHandler(
             event_handler=OnProcessExit(
                 target_action=load_zordi_cartesian_ik_controller,
@@ -240,14 +251,14 @@ def generate_launch_description():
                 ],
             )
         ),
-        # 3. After IK controller activates -> reset to home
+        # 3. After IK controller activates -> reset to test_pose
         RegisterEventHandler(
             event_handler=OnProcessExit(
                 target_action=activate_ik_controller,
                 on_exit=[
                     TimerAction(
                         period=0.5,
-                        actions=[reset_to_home],
+                        actions=[reset_to_test_pose],
                     )
                 ],
             )
@@ -255,7 +266,7 @@ def generate_launch_description():
         # 4. After reset -> unpause simulation
         RegisterEventHandler(
             event_handler=OnProcessExit(
-                target_action=reset_to_home,
+                target_action=reset_to_test_pose,
                 on_exit=[
                     TimerAction(
                         period=0.5,
