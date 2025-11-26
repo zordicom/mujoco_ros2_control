@@ -58,6 +58,7 @@ class MujocoSystem : public MujocoSystemInterface
 {
 public:
   MujocoSystem();
+  ~MujocoSystem() override;
 
   // Lifecycle methods
   CallbackReturn on_init(const hardware_interface::HardwareInfo& info) override;

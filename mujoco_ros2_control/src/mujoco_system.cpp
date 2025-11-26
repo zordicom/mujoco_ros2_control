@@ -36,6 +36,39 @@ namespace mujoco_ros2_control
 {
 MujocoSystem::MujocoSystem() : logger_(rclcpp::get_logger("")) {}
 
+MujocoSystem::~MujocoSystem()
+{
+  // Ensure viewer thread is stopped and joined before destruction
+  // This prevents std::terminate() if destructor is called without on_cleanup()
+  if (viewer_thread_.joinable()) {
+    // Signal the viewer thread to stop
+    // The thread handles its own GLFW cleanup (glfwTerminate) when it exits
+    stop_viewer_ = true;
+    viewer_thread_.join();
+  }
+
+  // NOTE: Don't call rendering_->close() here - the viewer thread already
+  // called glfwTerminate() when it exited, so any GLFW calls would be invalid.
+
+  // Ensure executor thread is stopped
+  if (executor_) {
+    executor_->cancel();
+  }
+  if (executor_thread_.joinable()) {
+    executor_thread_.join();
+  }
+
+  // Free MuJoCo resources if not already freed
+  if (mj_data_) {
+    mj_deleteData(mj_data_);
+    mj_data_ = nullptr;
+  }
+  if (mj_model_) {
+    mj_deleteModel(mj_model_);
+    mj_model_ = nullptr;
+  }
+}
+
 CallbackReturn MujocoSystem::on_init(const hardware_interface::HardwareInfo& info) {
   if (hardware_interface::SystemInterface::on_init(info) != CallbackReturn::SUCCESS) {
     return CallbackReturn::ERROR;
@@ -207,8 +240,17 @@ CallbackReturn MujocoSystem::on_configure(const rclcpp_lifecycle::State& /* prev
         std::this_thread::sleep_for(std::chrono::milliseconds(16)); // ~60 Hz
       }
 
-      RCLCPP_INFO(logger_, "Viewer thread stopped");
+      RCLCPP_INFO(logger_, "Viewer thread stopping - cleaning up...");
+
+      // Clean up MuJoCo visualization resources and GLFW
+      // NOTE: rendering_->close() destroys the window and frees MuJoCo scene/context
+      // glfwTerminate() must be called AFTER to fully clean up GLFW
+      if (rendering_) {
+        rendering_->close();
+      }
       glfwTerminate();
+
+      RCLCPP_INFO(logger_, "Viewer thread stopped");
     });
 
     RCLCPP_INFO(logger_, "MuJoCo interactive viewer enabled (background thread)");
@@ -254,12 +296,10 @@ CallbackReturn MujocoSystem::on_deactivate(const rclcpp_lifecycle::State& /* pre
 CallbackReturn MujocoSystem::on_cleanup(const rclcpp_lifecycle::State& /* prev */) {
   RCLCPP_INFO(logger_, "Cleaning up MujocoSystem...");
 
-  // Stop viewer thread if running
+  // Stop viewer thread if running - the thread handles its own cleanup
+  // (calls rendering_->close() and glfwTerminate() when it exits)
   if (viewer_thread_.joinable()) {
     stop_viewer_ = true;
-    if (rendering_) {
-      rendering_->close();
-    }
     viewer_thread_.join();
     RCLCPP_INFO(logger_, "Viewer thread stopped");
   }
