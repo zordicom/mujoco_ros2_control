@@ -229,12 +229,12 @@ zordi_cartesian_ik_controller:
     # Target JTC to forward commands to (any controller with FollowJointTrajectory action)
     # Can be: zordi_joint_effort_controller, zordi_joint_mit_controller,
     #         joint_trajectory_controller (ROS native), etc.
-    target_controller: "zordi_joint_effort_controller"
+    target_controller: "joint_trajectory_controller"
 
     # IK solver parameters
     ik:
       max_iterations: 1000
-      tolerance: 1.0e-6
+      tolerance: 5.0e-4  # 100 micrometers - practical tolerance (errors ~50um converge quickly)
       damping: 0.01
       step_size: 1.0
 
