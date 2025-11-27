@@ -300,13 +300,13 @@ zordi_cartesian_ik_controller:
     end_effector_frame: "ee_link"
     base_frame: "world"
 
-    # Target controller to send joint trajectories to (ROS native JTC for stability)
-    target_controller: "joint_trajectory_controller"
+    # Target controller to send joint trajectories to (Zordi MIT has gravity compensation)
+    target_controller: "zordi_joint_mit_controller"
 
     # IK solver parameters (tuned for reliable convergence)
     ik:
       max_iterations: 1000
-      tolerance: 5.0e-4  # 500 micrometers - practical tolerance
+      tolerance: 0.005  # 5mm - tight tolerance with gravity-compensated controller
       damping: 0.01
       step_size: 1.0
 

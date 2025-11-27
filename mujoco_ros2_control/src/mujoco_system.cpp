@@ -558,6 +558,31 @@ hardware_interface::return_type MujocoSystem::write(
     if (pending_reset_.pending) {
       reset_to_keyframe(pending_reset_.keyframe);
       pending_reset_.pending = false;
+
+      // CRITICAL: Re-neutralize actuators after keyframe reset!
+      // The ctrl values were set above based on the OLD positions before reset.
+      // After keyframe reset, positions change, so we must update ctrl to match.
+      for (auto &joint_state : joint_states_) {
+        const double q = mj_data_->qpos[joint_state.mj_pos_adr];
+        const double qd = mj_data_->qvel[joint_state.mj_vel_adr];
+
+        // Neutralize position actuator to new position
+        if (joint_state.mj_pos_actuator_id >= 0 &&
+            joint_state.mj_pos_actuator_id < mj_model_->nu) {
+          mj_data_->ctrl[joint_state.mj_pos_actuator_id] = q;
+        }
+        // Neutralize velocity actuator to new velocity
+        if (joint_state.mj_vel_actuator_id >= 0 &&
+            joint_state.mj_vel_actuator_id < mj_model_->nu) {
+          mj_data_->ctrl[joint_state.mj_vel_actuator_id] = qd;
+        }
+        // Zero torque actuator
+        if (joint_state.mj_tau_actuator_id >= 0 &&
+            joint_state.mj_tau_actuator_id < mj_model_->nu) {
+          mj_data_->ctrl[joint_state.mj_tau_actuator_id] = 0.0;
+        }
+      }
+      RCLCPP_INFO(logger_, "Keyframe reset: re-neutralized all actuators");
     }
   }
 

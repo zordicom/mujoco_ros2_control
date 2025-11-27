@@ -1,10 +1,10 @@
 """
 Copyright 2025 Zordi, Inc. All rights reserved.
 
-Automated launch file for debugging Cartesian IK controller with GRAVITY.
+Automated launch file for Cartesian IK controller with GRAVITY compensation.
 
 This test uses the 2-DOF vertical double pendulum (with gravity) and
-zordi_joint_mit_controller (which has gravity compensation).
+zordi_joint_mit_controller (which has gravity compensation to hold position).
 
 Vertical pendulum kinematics (Y-axis rotation):
   - Joint 1 at (0, 0, 1.5) in world frame
@@ -14,18 +14,19 @@ Vertical pendulum kinematics (Y-axis rotation):
 
 Test waypoints (FK-computed from joint configurations):
   NOTE: Positive Y rotation swings pendulum in -X direction!
-  q=[0.30, -0.20] -> EE at (-0.1977, 0, 0.5248), quat(w=0.9988, y=0.0500)
-  q=[0.35, -0.25] -> EE at (-0.2214, 0, 0.5328), quat(w=0.9988, y=0.0500)
-  q=[0.40, -0.30] -> EE at (-0.2446, 0, 0.5420), quat(w=0.9988, y=0.0500)
+  Starting from keyframe q=[0.30, -0.20], moving +0.1 rad per joint per waypoint:
+  q=[0.40, -0.10] -> EE at (-0.3425, 0, 0.5618), quat(w=0.9888, y=0.1494)
+  q=[0.50,  0.00] -> EE at (-0.4794, 0, 0.6224), quat(w=0.9689, y=0.2474)
+  q=[0.60,  0.10] -> EE at (-0.6044, 0, 0.7049), quat(w=0.9394, y=0.3429)
+  q=[0.70,  0.20] -> EE at (-0.7138, 0, 0.8068), quat(w=0.9004, y=0.4350)
+  q=[0.80,  0.30] -> EE at (-0.8043, 0, 0.9248), quat(w=0.8525, y=0.5227)
 
-Launch sequence:
+Launch sequence (all while simulation is PAUSED until step 4):
   1. Start controller manager with 2dof_gravity robot
-  2. Load controllers: joint_state_broadcaster, zordi_joint_mit_controller, IK
-  3. Activate target JTC (zordi_joint_mit_controller - has gravity comp)
-  4. Activate IK controller (zordi_cartesian_ik_controller)
-  5. Reset robot to test_pose keyframe (q=[0.3, -0.2])
-  6. Unpause simulation
-  7. Send test Cartesian trajectory (3 waypoints in XZ plane)
+  2. Load and activate controllers: joint_state_broadcaster, joint_mit, IK
+  3. Reset robot to test_pose keyframe (works while paused!)
+  4. Unpause simulation (controllers active, robot at correct position)
+  5. Send test Cartesian trajectory (5 waypoints in XZ plane)
 
 Usage:
   ros2 launch mujoco_ros2_control_demos test_cartesian_ik.launch.py
@@ -86,20 +87,21 @@ def generate_launch_description():
         output="screen",
     )
 
-    # Load ROS native joint_trajectory_controller (position interface)
-    load_joint_trajectory_controller = Node(
+    # Load and activate Zordi Joint MIT controller (has gravity compensation)
+    # Using spawner without --inactive to activate immediately
+    load_zordi_joint_mit_controller = Node(
         package="controller_manager",
         executable="spawner",
         arguments=[
-            "joint_trajectory_controller",
+            "zordi_joint_mit_controller",
             "-c",
             "/controller_manager",
-            "--inactive",
         ],
         output="screen",
     )
 
-    # Load IK controller (forwards to zordi_joint_mit_controller)
+    # Load and activate IK controller (forwards to zordi_joint_mit_controller)
+    # Using spawner without --inactive to activate immediately
     load_zordi_cartesian_ik_controller = Node(
         package="controller_manager",
         executable="spawner",
@@ -107,35 +109,12 @@ def generate_launch_description():
             "zordi_cartesian_ik_controller",
             "-c",
             "/controller_manager",
-            "--inactive",
         ],
         output="screen",
     )
 
-    # === Step 2: Activate controllers (after they're loaded) ===
-    activate_jtc = ExecuteProcess(
-        cmd=[
-            "ros2",
-            "control",
-            "set_controller_state",
-            "joint_trajectory_controller",
-            "active",
-        ],
-        output="screen",
-    )
-
-    activate_ik_controller = ExecuteProcess(
-        cmd=[
-            "ros2",
-            "control",
-            "set_controller_state",
-            "zordi_cartesian_ik_controller",
-            "active",
-        ],
-        output="screen",
-    )
-
-    # === Step 3: Reset to test_pose keyframe (q=[0.3, -0.2]) ===
+    # === Step 2: Reset to test_pose keyframe (q=[0.3, -0.2]) ===
+    # (Controllers are activated automatically by spawners)
     reset_to_test_pose = ExecuteProcess(
         cmd=[
             "ros2",
@@ -148,7 +127,7 @@ def generate_launch_description():
         output="screen",
     )
 
-    # === Step 4: Unpause simulation ===
+    # === Step 3: Unpause simulation ===
     unpause_simulation = ExecuteProcess(
         cmd=[
             "ros2",
@@ -161,12 +140,16 @@ def generate_launch_description():
         output="screen",
     )
 
-    # === Step 5: Send test Cartesian trajectory ===
+    # === Step 4: Send test Cartesian trajectory ===
     # FK-computed waypoints for vertical pendulum (XZ plane, Y-axis rotation):
     # NOTE: Positive Y rotation swings pendulum in -X direction!
-    #   q=[0.30, -0.20] -> (-0.1977, 0, 0.5248), quat(w=0.9988, y=0.0500)
-    #   q=[0.35, -0.25] -> (-0.2214, 0, 0.5328), quat(w=0.9988, y=0.0500)
-    #   q=[0.40, -0.30] -> (-0.2446, 0, 0.5420), quat(w=0.9988, y=0.0500)
+    # Starting from keyframe q=[0.30, -0.20], moving +0.1 rad per joint per waypoint:
+    #   q=[0.40, -0.10] -> (-0.3425, 0, 0.5618), quat(w=0.9888, y=0.1494)
+    #   q=[0.50,  0.00] -> (-0.4794, 0, 0.6224), quat(w=0.9689, y=0.2474)
+    #   q=[0.60,  0.10] -> (-0.6044, 0, 0.7049), quat(w=0.9394, y=0.3429)
+    #   q=[0.70,  0.20] -> (-0.7138, 0, 0.8068), quat(w=0.9004, y=0.4350)
+    #   q=[0.80,  0.30] -> (-0.8043, 0, 0.9248), quat(w=0.8525, y=0.5227)
+    # Using 2s per waypoint (10s total) for smoother tracking with PD controller
     send_test_trajectory = ExecuteProcess(
         cmd=[
             "ros2",
@@ -182,8 +165,8 @@ def generate_launch_description():
                     {
                         point: {
                             pose: {
-                                position: {x: -0.1977, y: 0.0, z: 0.5248},
-                                orientation: {w: 0.9988, x: 0.0, y: 0.0500, z: 0.0}
+                                position: {x: -0.3425, y: 0.0, z: 0.5618},
+                                orientation: {w: 0.9888, x: 0.0, y: 0.1494, z: 0.0}
                             }
                         },
                         time_from_start: {sec: 2}
@@ -191,8 +174,8 @@ def generate_launch_description():
                     {
                         point: {
                             pose: {
-                                position: {x: -0.2214, y: 0.0, z: 0.5328},
-                                orientation: {w: 0.9988, x: 0.0, y: 0.0500, z: 0.0}
+                                position: {x: -0.4794, y: 0.0, z: 0.6224},
+                                orientation: {w: 0.9689, x: 0.0, y: 0.2474, z: 0.0}
                             }
                         },
                         time_from_start: {sec: 4}
@@ -200,11 +183,29 @@ def generate_launch_description():
                     {
                         point: {
                             pose: {
-                                position: {x: -0.2446, y: 0.0, z: 0.5420},
-                                orientation: {w: 0.9988, x: 0.0, y: 0.0500, z: 0.0}
+                                position: {x: -0.6044, y: 0.0, z: 0.7049},
+                                orientation: {w: 0.9394, x: 0.0, y: 0.3429, z: 0.0}
                             }
                         },
                         time_from_start: {sec: 6}
+                    },
+                    {
+                        point: {
+                            pose: {
+                                position: {x: -0.7138, y: 0.0, z: 0.8068},
+                                orientation: {w: 0.9004, x: 0.0, y: 0.4350, z: 0.0}
+                            }
+                        },
+                        time_from_start: {sec: 8}
+                    },
+                    {
+                        point: {
+                            pose: {
+                                position: {x: -0.8043, y: 0.0, z: 0.9248},
+                                orientation: {w: 0.8525, x: 0.0, y: 0.5227, z: 0.0}
+                            }
+                        },
+                        time_from_start: {sec: 10}
                     }
                 ]
             }""",
@@ -224,46 +225,25 @@ def generate_launch_description():
         robot_state_pub_node,
         # Load controllers
         load_joint_state_broadcaster,
-        load_joint_trajectory_controller,
+        load_zordi_joint_mit_controller,
         load_zordi_cartesian_ik_controller,
-        # Chain of events after controllers load:
-        # 1. After IK controller loads -> activate target JTC (with gravity comp)
+        # Chain of events after controllers load and activate:
+        # Simulation is PAUSED. Reset works while paused (processed before pause check).
+        # Spawners activate controllers automatically (no --inactive flag).
+        #
+        # 1. After IK spawner exits -> reset to test_pose (works while paused!)
         RegisterEventHandler(
             event_handler=OnProcessExit(
                 target_action=load_zordi_cartesian_ik_controller,
                 on_exit=[
                     TimerAction(
-                        period=0.5,
-                        actions=[activate_jtc],
-                    )
-                ],
-            )
-        ),
-        # 2. After target JTC activates -> activate IK controller
-        RegisterEventHandler(
-            event_handler=OnProcessExit(
-                target_action=activate_jtc,
-                on_exit=[
-                    TimerAction(
-                        period=0.5,
-                        actions=[activate_ik_controller],
-                    )
-                ],
-            )
-        ),
-        # 3. After IK controller activates -> reset to test_pose
-        RegisterEventHandler(
-            event_handler=OnProcessExit(
-                target_action=activate_ik_controller,
-                on_exit=[
-                    TimerAction(
-                        period=0.5,
+                        period=1.0,  # Wait for all controllers to be fully active
                         actions=[reset_to_test_pose],
                     )
                 ],
             )
         ),
-        # 4. After reset -> unpause simulation
+        # 2. After reset -> unpause (controllers active, robot at correct position)
         RegisterEventHandler(
             event_handler=OnProcessExit(
                 target_action=reset_to_test_pose,
@@ -275,13 +255,13 @@ def generate_launch_description():
                 ],
             )
         ),
-        # 5. After unpause -> send test trajectory
+        # 3. After unpause -> send test trajectory
         RegisterEventHandler(
             event_handler=OnProcessExit(
                 target_action=unpause_simulation,
                 on_exit=[
                     TimerAction(
-                        period=1.0,  # Wait for simulation to stabilize
+                        period=0.5,
                         actions=[send_test_trajectory],
                     )
                 ],
