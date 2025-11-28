@@ -6,7 +6,8 @@ Integration test for hardware interface validation across actuator types.
 This test verifies that each actuator type correctly claims the expected
 command interfaces:
   - Position servo: position only
-  - Torque motor: effort only
+  - Position+velocity servo: position, velocity
+  - Torque motor: effort only (Dynamixel Current Mode, Kuka iiwa)
   - MIT motor: position, velocity, effort, kp, kd
 """
 

@@ -757,6 +757,7 @@ hardware_interface::return_type MujocoSystem::perform_command_mode_switch(
 
   // Validate MIT mode: if effort + (position or velocity) are claimed, kp/kd MUST also be claimed
   // This prevents misconfiguration where MIT-style control is expected but gains are missing
+  // Pure effort-only mode (Dynamixel Current Mode, Kuka iiwa) is allowed without kp/kd
   for (const auto &joint_state : joint_states_)
   {
     bool mit_intent = joint_state.effort_command_active &&
@@ -767,7 +768,8 @@ hardware_interface::return_type MujocoSystem::perform_command_mode_switch(
       RCLCPP_ERROR(logger_,
         "Joint '%s': MIT mode detected (effort + position/velocity claimed) but kp/kd interfaces "
         "not claimed. MIT mode requires all 5 interfaces: [position, velocity, effort, kp, kd]. "
-        "For pure torque mode, claim only [effort]. For position servo mode, claim only [position].",
+        "For pure torque mode (Dynamixel Current Mode), claim only [effort]. "
+        "For position servo mode, claim only [position].",
         joint_state.name.c_str());
       return hardware_interface::return_type::ERROR;
     }

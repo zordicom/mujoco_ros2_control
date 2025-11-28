@@ -73,8 +73,11 @@ Each joint can have up to three independent actuators in the MuJoCo model:
 |-------------------|------|----------|
 | Position only | Position Mode | Position actuator driven, others neutralized |
 | Velocity only | Velocity Mode | Velocity actuator driven, others neutralized |
-| Effort only | Torque Mode | Torque actuator driven, others neutralized |
-| Effort + Position/Velocity | MIT Mode | τ = Kp*(q_cmd - q) + Kd*(qd_cmd - qd) + τ_ff |
+| Position + Velocity | Position+Velocity Mode | Both actuators active for trajectory tracking |
+| Effort only | Torque Mode | Direct torque passthrough (Dynamixel Current Mode) |
+| Effort + pos/vel + kp + kd | MIT Mode | τ = Kp*(q_cmd - q) + Kd*(qd_cmd - qd) + τ_ff |
+
+**Note:** MIT mode (effort + position/velocity) requires kp/kd interfaces. Pure effort-only mode is allowed for Dynamixel Current Mode simulation.
 
 ---
 
@@ -407,6 +410,25 @@ Controllers are loaded automatically via spawner. Simulation starts PAUSED.
 ---
 
 ## Changelog
+
+### 2025-11-28: Support Both MIT Mode and Pure Torque Mode
+
+**Supported Motor Types:**
+
+- **Pure Torque Mode** (Dynamixel Current Mode, Kuka iiwa): Claim `[effort]` only
+- **MIT Mode** (Damiao, Unitree): Claim `[position, velocity, effort, kp, kd]`
+
+**Validation:**
+
+MIT mode (effort + position/velocity) requires kp/kd interfaces. Pure effort-only is allowed for motors that support direct torque control.
+
+**ZordiJointController Changes:**
+
+- `compute_pd_internally: true` now uses MIT protocol with kp=kd=0 (software PD)
+- `compute_pd_internally: false` sends config gains to hardware (hardware PD)
+- Both modes claim all 5 MIT interfaces for Damiao compatibility
+
+---
 
 ### 2025-11-24: Unified Architecture
 

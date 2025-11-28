@@ -14,7 +14,7 @@ This repository contains a ROS2 control package for MuJoCo simulation, offering 
 - **Dynamic interface activation:** Runtime switching between control modes without reconfiguration
 - **True MIT mode support:** Controller sends (position, velocity, effort, kp, kd) each cycle for variable impedance
 - **Gain safety limits:** max_kp/max_kd from URDF prevent runaway gains
-- **Flexible control strategies:** Position servo, torque motor, or MIT motor modes
+- **Flexible control strategies:** Position servo, position+velocity, or MIT motor modes
 
 See [Actuator Types Guide](mujoco_ros2_control/docs/ACTUATOR_TYPES.md) for detailed documentation.
 
@@ -201,13 +201,15 @@ MuJoCo XML models must include actuators that match the command interfaces decla
 </actuator>
 ```
 
-**Example: Effort-only control:**
+**Example: Pure torque control (Dynamixel Current Mode, Kuka iiwa):**
 
 ```xml
 <actuator>
   <motor name="act_tau_joint_name" joint="joint_name"/>
 </actuator>
 ```
+
+Pure effort-only mode is supported for motors like Dynamixel in Current Control mode.
 
 ### MIT Mode Configuration
 
@@ -240,7 +242,7 @@ zordi_joint_mit_controller:
     default_kd: [10.0, 8.0]
 ```
 
-**Validation:** If a controller claims `[position, velocity, effort]` without `[kp, kd]`, the hardware interface will **error out** to prevent misconfiguration.
+**Validation:** MIT mode (effort + position/velocity) requires `kp` and `kd` interfaces. Pure effort-only mode is allowed for motors like Dynamixel Current Mode.
 
 **MuJoCo Model:** Set `kv="0"` on position actuators to prevent interference when neutralized.
 

@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <!--
 Torque Motor Test URDF (headless)
-Demonstrates effort-only control interface (like Kuka iiwa)
+Demonstrates effort-only control interface (like Dynamixel Current Mode, Kuka iiwa)
 -->
 <robot name="torque_motor_pendulum">
   <link name="world"/>

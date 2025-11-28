@@ -17,6 +17,12 @@ controller_manager:
     forward_effort_controller:
       type: forward_command_controller/ForwardCommandController
 
+    forward_kp_controller:
+      type: forward_command_controller/ForwardCommandController
+
+    forward_kd_controller:
+      type: forward_command_controller/ForwardCommandController
+
 joint_state_broadcaster:
   ros__parameters:
     use_local_topics: false
@@ -41,4 +47,18 @@ forward_effort_controller:
     joints:
       - joint1
     interface_name: effort
+
+# Forward command controller for kp interface (MIT mode)
+forward_kp_controller:
+  ros__parameters:
+    joints:
+      - joint1
+    interface_name: kp
+
+# Forward command controller for kd interface (MIT mode)
+forward_kd_controller:
+  ros__parameters:
+    joints:
+      - joint1
+    interface_name: kd
 

@@ -5,8 +5,8 @@ Integration test for MIT motor actuator type.
 
 This test verifies that an MIT motor (like Damiao DM-J4310) works correctly:
   - Verifies all 5 interfaces are available (position, velocity, effort, kp, kd)
-  - Tests gain safety limits (max_kp, max_kd) are enforced
-  - Tests basic impedance response with different gains
+  - Tests MIT mode with kp=kd=0 (torque passthrough - pendulum falls)
+  - Tests MIT mode with non-zero kp/kd (impedance control - pendulum holds)
 """
 
 import subprocess
@@ -25,6 +25,7 @@ from ament_index_python.packages import get_package_share_directory
 from controller_manager_msgs.srv import ListHardwareInterfaces
 from mujoco_ros2_control_msgs.srv import SimulationControl
 from sensor_msgs.msg import JointState
+from std_msgs.msg import Float64MultiArray
 
 
 def print_result_box(title: str, lines: list[str], width: int = 70):
@@ -76,10 +77,52 @@ def generate_test_description():
         output="screen",
     )
 
+    # Spawn all 5 MIT mode controllers (order matters for interface claiming)
+    # kp and kd must be claimed before effort+position/velocity
+    load_kp_controller = launch_ros.actions.Node(
+        package="controller_manager",
+        executable="spawner",
+        arguments=["forward_kp_controller", "-c", "/controller_manager"],
+        output="screen",
+    )
+
+    load_kd_controller = launch_ros.actions.Node(
+        package="controller_manager",
+        executable="spawner",
+        arguments=["forward_kd_controller", "-c", "/controller_manager"],
+        output="screen",
+    )
+
+    load_position_controller = launch_ros.actions.Node(
+        package="controller_manager",
+        executable="spawner",
+        arguments=["forward_position_controller", "-c", "/controller_manager"],
+        output="screen",
+    )
+
+    load_velocity_controller = launch_ros.actions.Node(
+        package="controller_manager",
+        executable="spawner",
+        arguments=["forward_velocity_controller", "-c", "/controller_manager"],
+        output="screen",
+    )
+
+    load_effort_controller = launch_ros.actions.Node(
+        package="controller_manager",
+        executable="spawner",
+        arguments=["forward_effort_controller", "-c", "/controller_manager"],
+        output="screen",
+    )
+
     return launch.LaunchDescription([
         controller_manager_node,
         robot_state_pub_node,
         load_joint_state_broadcaster,
+        load_kp_controller,
+        load_kd_controller,
+        load_position_controller,
+        load_velocity_controller,
+        load_effort_controller,
         launch_testing.actions.ReadyToTest(),
     ]), {
         "controller_manager_node": controller_manager_node,
@@ -100,7 +143,7 @@ class TestMITMotor(unittest.TestCase):
         rclpy.shutdown()
 
     def setUp(self):
-        """Create test node."""
+        """Create test node and publishers."""
         self.node = rclpy.create_node("test_mit_motor")
         self.joint_states = None
         self.joint_sub = self.node.create_subscription(
@@ -108,6 +151,23 @@ class TestMITMotor(unittest.TestCase):
             "/joint_states",
             self._joint_callback,
             10,
+        )
+
+        # Create publishers for all 5 MIT interfaces
+        self.pos_pub = self.node.create_publisher(
+            Float64MultiArray, "/forward_position_controller/commands", 10
+        )
+        self.vel_pub = self.node.create_publisher(
+            Float64MultiArray, "/forward_velocity_controller/commands", 10
+        )
+        self.effort_pub = self.node.create_publisher(
+            Float64MultiArray, "/forward_effort_controller/commands", 10
+        )
+        self.kp_pub = self.node.create_publisher(
+            Float64MultiArray, "/forward_kp_controller/commands", 10
+        )
+        self.kd_pub = self.node.create_publisher(
+            Float64MultiArray, "/forward_kd_controller/commands", 10
         )
 
     def tearDown(self):
@@ -156,6 +216,42 @@ class TestMITMotor(unittest.TestCase):
             "/mujoco_system/simulation_control",
             request,
         )
+
+    def _reset_simulation(self):
+        """Reset the MuJoCo simulation to initial state."""
+        request = SimulationControl.Request()
+        request.command = "reset"
+        return self._call_service(
+            SimulationControl,
+            "/mujoco_system/simulation_control",
+            request,
+        )
+
+    def _pause_simulation(self):
+        """Pause the MuJoCo simulation."""
+        request = SimulationControl.Request()
+        request.command = "pause"
+        return self._call_service(
+            SimulationControl,
+            "/mujoco_system/simulation_control",
+            request,
+        )
+
+    def _send_mit_command(
+        self, pos: float, vel: float, effort: float, kp: float, kd: float
+    ):
+        """Send commands to all 5 MIT interfaces."""
+        pos_msg = Float64MultiArray(data=[pos])
+        vel_msg = Float64MultiArray(data=[vel])
+        effort_msg = Float64MultiArray(data=[effort])
+        kp_msg = Float64MultiArray(data=[kp])
+        kd_msg = Float64MultiArray(data=[kd])
+
+        self.pos_pub.publish(pos_msg)
+        self.vel_pub.publish(vel_msg)
+        self.effort_pub.publish(effort_msg)
+        self.kp_pub.publish(kp_msg)
+        self.kd_pub.publish(kd_msg)
 
     def test_mit_interfaces(self):
         """Verify MIT motor has all 5 command interfaces."""
@@ -207,82 +303,102 @@ class TestMITMotor(unittest.TestCase):
         self.assertIn("velocity", state_interfaces)
         self.assertIn("effort", state_interfaces)
 
-    def test_joint_state_publishing(self):
-        """Test that MIT motor publishes joint states correctly."""
-        # Wait for joint states
+    def test_mit_torque_passthrough(self):
+        """Test MIT mode with kp=kd=0 (torque passthrough - pendulum falls)."""
+        # Wait for controllers to be ready
         self.assertTrue(
             self._wait_for_joint_states(timeout=30.0),
             "Joint states not received",
         )
 
-        # Unpause simulation
+        # Reset and pause simulation
+        self._reset_simulation()
+        self._wait_with_spin(0.5)
+
+        # Get initial position (should be ~0)
+        rclpy.spin_once(self.node, timeout_sec=0.1)
+        initial_position = self.joint_states.position[0]
+
+        # Send MIT command with kp=kd=0 (pure torque passthrough, no effort)
+        self._send_mit_command(pos=0.0, vel=0.0, effort=0.0, kp=0.0, kd=0.0)
+        self._wait_with_spin(0.2)
+
+        # Unpause simulation - pendulum should fall under gravity
         self._unpause_simulation()
         self._wait_with_spin(1.0)
 
-        # Verify we have joint state data
+        # Get final position
         rclpy.spin_once(self.node, timeout_sec=0.1)
+        final_position = self.joint_states.position[0]
+        position_change = abs(final_position - initial_position)
 
         print_result_box(
-            "MIT Motor - Joint State Publishing",
+            "MIT Motor - Torque Passthrough (kp=kd=0)",
             [
-                f"Joint names: {self.joint_states.name}",
-                f"Positions:   {self.joint_states.position}",
-                f"Velocities:  {self.joint_states.velocity}",
-                f"Efforts:     {self.joint_states.effort}",
+                f"Initial position: {initial_position:.4f} rad",
+                f"Final position:   {final_position:.4f} rad",
+                f"Position change:  {position_change:.4f} rad",
                 "",
-                "Status: PASS (joint states received)",
+                "Expected: Pendulum falls under gravity (>0.1 rad change)",
+                f"Status: {'PASS' if position_change > 0.1 else 'FAIL'}",
             ],
         )
 
+        # Pendulum should have moved significantly under gravity
         self.assertGreater(
-            len(self.joint_states.name),
-            0,
-            "No joint names in joint state message",
-        )
-        self.assertEqual(
-            self.joint_states.name[0],
-            "joint1",
-            "Expected joint1 in joint states",
+            position_change,
+            0.1,
+            "Pendulum should fall under gravity with kp=kd=0",
         )
 
-    def test_hardware_interface_state(self):
-        """Test that hardware interface reports correct state."""
-        time.sleep(2.0)
-
-        request = ListHardwareInterfaces.Request()
-        result = self._call_service(
-            ListHardwareInterfaces,
-            "/controller_manager/list_hardware_interfaces",
-            request,
+    def test_mit_impedance_control(self):
+        """Test MIT mode with non-zero kp/kd (impedance control - holds position)."""
+        # Wait for controllers to be ready
+        self.assertTrue(
+            self._wait_for_joint_states(timeout=30.0),
+            "Joint states not received",
         )
 
-        # Check that interfaces are available (not claimed by other controllers)
-        position_available = False
-        kp_available = False
-        kd_available = False
+        # Reset and pause simulation
+        self._reset_simulation()
+        self._wait_with_spin(0.5)
 
-        for iface in result.command_interfaces:
-            if iface.name == "joint1/position":
-                position_available = not iface.is_claimed
-            if iface.name == "joint1/kp":
-                kp_available = not iface.is_claimed
-            if iface.name == "joint1/kd":
-                kd_available = not iface.is_claimed
+        # Get initial position (should be ~0)
+        rclpy.spin_once(self.node, timeout_sec=0.1)
+        initial_position = self.joint_states.position[0]
+
+        # Send MIT command with kp=100, kd=10 (impedance control at position 0)
+        self._send_mit_command(pos=0.0, vel=0.0, effort=0.0, kp=100.0, kd=10.0)
+        self._wait_with_spin(0.2)
+
+        # Unpause simulation - pendulum should be held by impedance control
+        self._unpause_simulation()
+        self._wait_with_spin(1.0)
+
+        # Get final position
+        rclpy.spin_once(self.node, timeout_sec=0.1)
+        final_position = self.joint_states.position[0]
+        position_error = abs(final_position - initial_position)
 
         print_result_box(
-            "MIT Motor - Hardware Interface State",
+            "MIT Motor - Impedance Control (kp=100, kd=10)",
             [
-                f"position interface available: {position_available}",
-                f"kp interface available: {kp_available}",
-                f"kd interface available: {kd_available}",
+                "Target position:  0.0000 rad",
+                f"Initial position: {initial_position:.4f} rad",
+                f"Final position:   {final_position:.4f} rad",
+                f"Position error:   {position_error:.4f} rad",
                 "",
-                "All interfaces should be available (not claimed by controllers)",
+                "Expected: Pendulum holds position (<0.1 rad error)",
+                f"Status: {'PASS' if position_error < 0.1 else 'FAIL'}",
             ],
         )
 
-        self.assertTrue(position_available, "Position interface should be available")
-        self.assertTrue(kp_available, "kp interface should be available")
-        self.assertTrue(kd_available, "kd interface should be available")
+        # Pendulum should stay near target with impedance control
+        self.assertLess(
+            position_error,
+            0.1,
+            "Pendulum should hold position with non-zero kp/kd",
+        )
 
 
 @launch_testing.post_shutdown_test()

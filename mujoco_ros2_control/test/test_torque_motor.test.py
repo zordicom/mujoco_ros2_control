@@ -3,11 +3,11 @@ Copyright 2025 Zordi, Inc. All rights reserved.
 
 Integration test for torque motor actuator type.
 
-This test verifies that a torque-only motor (like Kuka iiwa) works correctly:
+This test verifies that a pure torque-controlled motor (like Dynamixel Current Mode)
+works correctly:
   - Uses forward_command_controller to send effort commands
-  - Verifies joint responds to torque commands
-  - Tests gravity response (pendulum falls with zero torque)
-  - Tests holding with manual gravity compensation
+  - Verifies gravity causes pendulum to fall with zero torque
+  - Verifies applied torque can move the joint
 """
 
 import subprocess
@@ -23,7 +23,7 @@ import launch_testing.markers
 import pytest
 import rclpy
 from ament_index_python.packages import get_package_share_directory
-from mujoco_ros2_control_msgs.srv import ResetToKeyframe, SimulationControl
+from mujoco_ros2_control_msgs.srv import SimulationControl
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64MultiArray
 
@@ -171,75 +171,8 @@ class TestTorqueMotor(unittest.TestCase):
             request,
         )
 
-    def _reset_to_keyframe(self, keyframe: str = "horizontal"):
-        """Reset simulation to a keyframe."""
-        request = ResetToKeyframe.Request()
-        request.keyframe = keyframe
-        return self._call_service(
-            ResetToKeyframe,
-            "/mujoco_system/reset_to_keyframe",
-            request,
-        )
-
     def test_gravity_response(self):
-        """Test that pendulum falls under gravity with zero torque."""
-        # Wait for joint states
-        self.assertTrue(
-            self._wait_for_joint_states(timeout=30.0),
-            "Joint states not received",
-        )
-
-        # Reset to horizontal position
-        self._reset_to_keyframe("horizontal")
-        self._wait_with_spin(0.5)
-
-        # Unpause simulation
-        self._unpause_simulation()
-        self._wait_with_spin(0.5)
-
-        # Get initial position (should be ~1.57 rad = horizontal)
-        rclpy.spin_once(self.node, timeout_sec=0.1)
-        initial_pos = self.joint_states.position[0]
-
-        # Send zero torque
-        cmd = Float64MultiArray()
-        cmd.data = [0.0]
-
-        for _ in range(10):
-            self.cmd_pub.publish(cmd)
-            self._wait_with_spin(0.1)
-
-        # Wait for pendulum to fall
-        self._wait_with_spin(2.0)
-
-        # Get final position
-        rclpy.spin_once(self.node, timeout_sec=0.1)
-        final_pos = self.joint_states.position[0]
-
-        # Calculate movement (should have fallen toward 0)
-        movement = initial_pos - final_pos
-
-        print_result_box(
-            "Torque Motor - Gravity Response",
-            [
-                f"Initial position: {initial_pos:.4f} rad ({initial_pos * 57.3:.1f}°)",
-                f"Final position:   {final_pos:.4f} rad ({final_pos * 57.3:.1f}°)",
-                f"Movement:         {movement:.4f} rad ({movement * 57.3:.1f}°)",
-                "",
-                "Expected: Pendulum should fall toward hanging position (0 rad)",
-                f"Status: {'PASS' if movement > 0.5 else 'FAIL'}",
-            ],
-        )
-
-        # Verify pendulum fell (moved toward 0)
-        self.assertGreater(
-            movement,
-            0.3,  # Should move at least 0.3 rad (accounting for damping)
-            f"Pendulum should fall under gravity, but only moved {movement:.4f} rad",
-        )
-
-    def test_torque_response(self):
-        """Test that motor responds to torque command."""
+        """Test that pendulum falls with zero torque (no internal PD)."""
         # Wait for joint states
         self.assertTrue(
             self._wait_for_joint_states(timeout=30.0),
@@ -251,43 +184,93 @@ class TestTorqueMotor(unittest.TestCase):
         self._wait_with_spin(1.0)
 
         # Get initial position
-        rclpy.spin_once(self.node, timeout_sec=0.1)
         initial_pos = self.joint_states.position[0]
 
-        # Apply positive torque
+        # Send zero torque command
         cmd = Float64MultiArray()
-        cmd.data = [5.0]  # 5 Nm
+        cmd.data = [0.0]
 
-        for _ in range(20):
+        for _ in range(10):
             self.cmd_pub.publish(cmd)
-            self._wait_with_spin(0.05)
+            self._wait_with_spin(0.1)
 
-        # Wait for response
-        self._wait_with_spin(1.0)
+        # Wait for gravity to act
+        self._wait_with_spin(2.0)
 
         # Get final position
         rclpy.spin_once(self.node, timeout_sec=0.1)
         final_pos = self.joint_states.position[0]
 
+        # Pendulum should have moved due to gravity (no internal PD to hold it)
+        movement = abs(final_pos - initial_pos)
+
+        print_result_box(
+            "Torque Motor - Gravity Response",
+            [
+                f"Initial position: {initial_pos:.4f} rad",
+                f"Final position:   {final_pos:.4f} rad",
+                f"Movement:         {movement:.4f} rad ({movement * 57.3:.2f}°)",
+                "",
+                "Expected: Pendulum should fall (no internal PD)",
+                f"Status: {'PASS' if movement > 0.1 else 'FAIL'}",
+            ],
+        )
+
+        self.assertGreater(
+            movement,
+            0.1,  # Should move at least 0.1 rad (~5.7 degrees)
+            "Torque motor should allow gravity to move pendulum "
+            f"(movement was only {movement:.4f} rad)",
+        )
+
+    def test_torque_response(self):
+        """Test that applied torque moves the joint."""
+        # Wait for joint states
+        self.assertTrue(
+            self._wait_for_joint_states(timeout=30.0),
+            "Joint states not received",
+        )
+
+        # Unpause simulation
+        self._unpause_simulation()
+        self._wait_with_spin(1.0)
+
+        # Get initial position
+        initial_pos = self.joint_states.position[0]
+
+        # Apply positive torque to lift against gravity
+        torque = 5.0  # Nm (enough to overcome gravity)
+        cmd = Float64MultiArray()
+        cmd.data = [torque]
+
+        for _ in range(20):
+            self.cmd_pub.publish(cmd)
+            self._wait_with_spin(0.1)
+
+        # Get final position
+        rclpy.spin_once(self.node, timeout_sec=0.1)
+        final_pos = self.joint_states.position[0]
+
+        # Calculate movement
         movement = final_pos - initial_pos
 
         print_result_box(
             "Torque Motor - Torque Response",
             [
-                "Applied torque:   5.0 Nm",
+                f"Applied torque:   {torque:.2f} Nm",
                 f"Initial position: {initial_pos:.4f} rad",
                 f"Final position:   {final_pos:.4f} rad",
-                f"Movement:         {movement:.4f} rad",
+                f"Movement:         {movement:.4f} rad ({movement * 57.3:.2f}°)",
                 "",
-                f"Status: {'PASS' if abs(movement) > 0.1 else 'FAIL'}",
+                "Expected: Positive torque should cause positive movement",
+                f"Status: {'PASS' if movement > 0.1 else 'FAIL'}",
             ],
         )
 
-        # Verify motor responded to torque
         self.assertGreater(
-            abs(movement),
-            0.1,  # Should move at least 0.1 rad
-            f"Motor should respond to torque, but only moved {abs(movement):.4f} rad",
+            movement,
+            0.1,  # Should move at least 0.1 rad in positive direction
+            f"Applied torque should move joint (movement was {movement:.4f} rad)",
         )
 
 

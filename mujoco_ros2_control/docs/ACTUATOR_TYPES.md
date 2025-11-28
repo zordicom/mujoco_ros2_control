@@ -10,7 +10,7 @@ Modern robots use different types of actuators with fundamentally different cont
 |---------------|---------------|-------------------|----------------|
 | Position Servo | Dynamixel (position only), hobby servos | Position only | Fixed in firmware |
 | Position+Velocity Servo | Dynamixel (profile position), ODrive | Position + Velocity | Fixed in firmware |
-| Torque Motor | Kuka iiwa, research arms | Torque only | Controller computes all |
+| Pure Torque Motor | Dynamixel (current mode), Kuka iiwa | Torque only | Controller computes all |
 | MIT Motor | Damiao (MIT mode), Unitree, Cheetah | 5 values per cycle | Variable per command |
 
 ---
@@ -174,17 +174,17 @@ joint_trajectory_controller:
 
 ### Real-World Examples
 
+- Dynamixel X-series servos (Current Control mode)
 - Kuka iiwa joints (torque-controlled)
 - High-end research manipulators
-- Custom torque-controlled actuators
 
 ### Characteristics
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  Torque Motor (e.g., Kuka iiwa joint)               │
+│  Torque Motor (e.g., Dynamixel Current Mode)        │
 │                                                      │
-│  Input: Torque command                               │
+│  Input: Torque/current command only                  │
 │  Internal: Current control only (τ = Kt × I)        │
 │  Output: Joint torque                                │
 │                                                      │
@@ -239,7 +239,7 @@ zordi_joint_effort_controller:
 
 - Full torque control applications
 - Impedance control (with software-computed PD)
-- Testing torque-based controllers
+- Simulating Dynamixel motors in Current Control mode
 - When you need maximum control authority
 
 ---
@@ -349,6 +349,8 @@ zordi_joint_mit_controller:
 
 If a controller claims `[position, velocity, effort]` WITHOUT `[kp, kd]`, the hardware interface will **error out** with a clear message. This prevents misconfiguration where MIT-style control is expected but gains are missing.
 
+Pure effort-only mode (Dynamixel Current Mode, Kuka iiwa) is allowed and does NOT require kp/kd interfaces.
+
 ---
 
 ## Choosing the Right Mode
@@ -369,6 +371,7 @@ If a controller claims `[position, velocity, effort]` WITHOUT `[kp, kd]`, the ha
 ### Use Torque Motor Mode When:
 
 - Full torque control is required
+- Simulating Dynamixel motors in Current Control mode
 - You want controller to compute all dynamics
 - Testing pure torque-based algorithms
 
