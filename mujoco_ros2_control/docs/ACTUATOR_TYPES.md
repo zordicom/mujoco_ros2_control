@@ -1,6 +1,6 @@
 # Actuator Types and MuJoCo Simulation
 
-This guide explains the three common actuator types in robotics and how `mujoco_ros2_control` simulates each one.
+This guide explains the four common actuator types in robotics and how `mujoco_ros2_control` simulates each one.
 
 ## Overview
 
@@ -8,9 +8,10 @@ Modern robots use different types of actuators with fundamentally different cont
 
 | Actuator Type | Real Examples | Control Interface | Gains Location |
 |---------------|---------------|-------------------|----------------|
-| Position Servo | Dynamixel, hobby servos | Position only | Fixed in firmware |
+| Position Servo | Dynamixel (position only), hobby servos | Position only | Fixed in firmware |
+| Position+Velocity Servo | Dynamixel (profile position), ODrive | Position + Velocity | Fixed in firmware |
 | Torque Motor | Kuka iiwa, research arms | Torque only | Controller computes all |
-| MIT Motor | Damiao, Unitree, Cheetah | 5 values per cycle | Variable per command |
+| MIT Motor | Damiao (MIT mode), Unitree, Cheetah | 5 values per cycle | Variable per command |
 
 ---
 
@@ -72,7 +73,104 @@ Controller claims only the `position` interface:
 
 ---
 
-## Type 2: Pure Torque Motors
+## Type 2: Position+Velocity Servos
+
+### Real-World Examples
+
+- Dynamixel X-series servos (Profile Position mode)
+- ODrive motor controllers
+- Most EtherCAT/CiA 402 drives (Profile Position mode)
+- Universal Robots (servoj command)
+
+### Characteristics
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  Position+Velocity Servo (e.g., Dynamixel Profile Position)         │
+│                                                                      │
+│  Input: Position command + Velocity command                          │
+│  Internal: PD loop at 1-8 kHz (fixed gains)                         │
+│  Control law: τ = kp*(p_des - p) + kd*(v_des - v)                   │
+│  Output: Motor current                                               │
+│                                                                      │
+│  User CANNOT change PD gains at runtime                              │
+│  Velocity is used as feedforward (target velocity at trajectory pt)  │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Important Distinction:** This mode uses velocity as a **feedforward target** (the desired velocity at each trajectory point), NOT as a speed limit for ramping. This is different from Damiao's native "position-speed mode" where velocity specifies a maximum speed to reach the target position.
+
+### MuJoCo Simulation
+
+Use separate `<position>` and `<velocity>` actuators with the position actuator's `kv=0`:
+
+```xml
+<!-- MuJoCo model (*.xml) -->
+<actuator>
+  <!-- Position actuator: kp only, no velocity damping -->
+  <position name="act_pos_joint1" joint="joint1" kp="100" kv="0"/>
+  <!-- Velocity actuator: provides kd term -->
+  <velocity name="act_vel_joint1" joint="joint1" kv="10"/>
+</actuator>
+```
+
+This configuration produces the control law:
+```
+τ = kp*(pos_cmd - q) + kv*(vel_cmd - qd)
+```
+
+Controller claims both `position` and `velocity` interfaces:
+
+```xml
+<!-- URDF ros2_control section -->
+<joint name="joint1">
+  <command_interface name="position"/>
+  <command_interface name="velocity"/>
+  <state_interface name="position"/>
+  <state_interface name="velocity"/>
+</joint>
+```
+
+### Compatible Controllers
+
+- `ros2_controllers/joint_trajectory_controller` (position+velocity mode)
+- Any controller that outputs both position and velocity commands
+
+### Example Configuration
+
+```yaml
+joint_trajectory_controller:
+  ros__parameters:
+    joints:
+      - joint1
+    command_interfaces:
+      - position
+      - velocity
+    state_interfaces:
+      - position
+      - velocity
+    allow_partial_joints_goal: false
+```
+
+### When to Use
+
+- When using `joint_trajectory_controller` with velocity feedforward
+- Simulating Dynamixel servos in Profile Position mode
+- When you want smoother trajectory tracking than position-only mode
+- Standard ROS trajectory execution applications
+
+### Comparison with Damiao Position-Speed Mode
+
+| Feature | Position+Velocity (This Mode) | Damiao Position-Speed Mode |
+|---------|------------------------------|---------------------------|
+| Velocity meaning | Target velocity at trajectory point | Speed **limit** for ramping |
+| Control law | `τ = kp*(p_des - p) + kd*(v_des - v)` | Internal trajectory interpolation |
+| Example | JTC sends pos=1.0, vel=0.5 → track at 0.5 rad/s | Move to pos=1.0 at max 0.5 rad/s |
+| Supported | Yes | Not yet implemented |
+
+---
+
+## Type 3: Pure Torque Motors
 
 ### Real-World Examples
 
@@ -146,7 +244,7 @@ zordi_joint_effort_controller:
 
 ---
 
-## Type 3: MIT-Mode / Quasi-Direct-Drive Motors
+## Type 4: MIT-Mode / Quasi-Direct-Drive Motors
 
 ### Real-World Examples
 
@@ -243,6 +341,7 @@ zordi_joint_mit_controller:
 | Mode | Interfaces Claimed | Behavior |
 |------|-------------------|----------|
 | Position Servo | `[position]` | MuJoCo position actuator handles PD |
+| Position+Velocity | `[position, velocity]` | Separate position/velocity actuators provide PD |
 | Pure Torque | `[effort]` | Direct passthrough, controller computes all |
 | MIT Mode | `[position, velocity, effort, kp, kd]` | Hardware computes PD with controller gains |
 
@@ -256,9 +355,16 @@ If a controller claims `[position, velocity, effort]` WITHOUT `[kp, kd]`, the ha
 
 ### Use Position Servo Mode When:
 
-- Simulating Dynamixel-based robots
-- Simple pick-and-place applications
-- You don't need torque control
+- Simulating simple servo-based robots
+- Position-only control applications
+- You don't need velocity feedforward or torque control
+
+### Use Position+Velocity Mode When:
+
+- Using `joint_trajectory_controller` with velocity feedforward
+- Simulating Dynamixel Profile Position mode or similar
+- You want smoother trajectory tracking than position-only
+- Standard ROS trajectory execution
 
 ### Use Torque Motor Mode When:
 
@@ -268,7 +374,7 @@ If a controller claims `[position, velocity, effort]` WITHOUT `[kp, kd]`, the ha
 
 ### Use MIT Mode When:
 
-- Simulating Damiao, Unitree, or similar actuators
+- Simulating Damiao (MIT mode), Unitree, or similar actuators
 - Variable impedance control is needed
 - You want hardware-level PD with configurable gains
 - Compliant manipulation applications
@@ -283,6 +389,6 @@ If a controller claims `[position, velocity, effort]` WITHOUT `[kp, kd]`, the ha
 
 ---
 
-**Document Version:** 1.0
-**Last Updated:** 2025-01-27
+**Document Version:** 1.1
+**Last Updated:** 2025-05-28
 

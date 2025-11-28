@@ -11,6 +11,9 @@ controller_manager:
     forward_position_controller:
       type: forward_command_controller/ForwardCommandController
 
+    forward_velocity_controller:
+      type: forward_command_controller/ForwardCommandController
+
     forward_effort_controller:
       type: forward_command_controller/ForwardCommandController
 
@@ -24,6 +27,13 @@ forward_position_controller:
     joints:
       - joint1
     interface_name: position
+
+# Forward command controller for velocity interface
+forward_velocity_controller:
+  ros__parameters:
+    joints:
+      - joint1
+    interface_name: velocity
 
 # Forward command controller for effort interface
 forward_effort_controller:
