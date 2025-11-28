@@ -1,0 +1,54 @@
+# MIT Motor Example Controller Configuration
+# Uses ZordiJointController in MIT mode with dynamic gains
+
+controller_manager:
+  ros__parameters:
+    update_rate: 1000
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    zordi_joint_mit_controller:
+      type: zordi_ros_controllers/ZordiJointController
+
+joint_state_broadcaster:
+  ros__parameters:
+    use_local_topics: false
+
+# ZordiJointController in MIT mode (true MIT)
+# Controller sends gains to hardware, hardware computes PD
+zordi_joint_mit_controller:
+  ros__parameters:
+    joints:
+      - joint1
+
+    # MIT mode: position, velocity, effort (kp/kd added automatically)
+    command_interfaces:
+      - position
+      - velocity
+      - effort
+
+    state_interfaces:
+      - position
+      - velocity
+
+    # Enable gravity compensation
+    use_gravity_compensation: true
+
+    # MIT mode: hardware computes PD using gains from controller
+    compute_pd_internally: false
+
+    # Default gains (sent to hardware each cycle)
+    # These can be changed dynamically for variable impedance
+    default_kp: [100.0]
+    default_kd: [10.0]
+
+    # Trajectory tolerances
+    constraints:
+      stopped_velocity_tolerance: 0.01
+      goal_time: 0.5
+
+    joint1:
+      trajectory: 0.1
+      goal: 0.05
+

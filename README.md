@@ -12,8 +12,11 @@ This repository contains a ROS2 control package for MuJoCo simulation, offering 
 
 - **Multi-interface control:** Each joint supports independent position, velocity, and torque actuators
 - **Dynamic interface activation:** Runtime switching between control modes without reconfiguration
-- **MIT mode support:** Simultaneous position/velocity/torque control with feedforward commands
-- **Flexible control strategies:** Pure position, pure velocity, pure torque, or combined modes
+- **True MIT mode support:** Controller sends (position, velocity, effort, kp, kd) each cycle for variable impedance
+- **Gain safety limits:** max_kp/max_kd from URDF prevent runaway gains
+- **Flexible control strategies:** Position servo, torque motor, or MIT motor modes
+
+See [Actuator Types Guide](mujoco_ros2_control/docs/ACTUATOR_TYPES.md) for detailed documentation.
 
 ### Simulation Control
 
@@ -206,17 +209,42 @@ MuJoCo XML models must include actuators that match the command interfaces decla
 </actuator>
 ```
 
-### MIT Mode Compatibility
+### MIT Mode Configuration
 
-**Only if you plan to use MIT mode (effort + position/velocity interfaces simultaneously),** set `kv="0"` on position actuators. This prevents unwanted velocity damping when the position actuator is neutralized.
+MIT mode enables variable impedance control where the controller sends all 5 values per cycle:
+- `position_desired`, `velocity_desired`, `effort_feedforward`, `kp`, `kd`
 
-When neutralized, the position actuator sets `ctrl = q_current`, resulting in:
+**URDF Configuration:**
 
-- `τ = kp*(q - q) - kv*q̇ = -kv*q̇`
+```xml
+<joint name="joint1">
+  <command_interface name="position"/>
+  <command_interface name="velocity"/>
+  <command_interface name="effort"/>
+  <command_interface name="kp"/>
+  <command_interface name="kd"/>
+  <!-- Safety limits (not default gains) -->
+  <param name="max_kp">500</param>
+  <param name="max_kd">50</param>
+</joint>
+```
 
-If `kv ≠ 0`, this creates velocity-dependent damping that interferes with your torque commands.
+**Controller Configuration (YAML):**
 
-**For pure position control** (no effort interface), you can use `kv > 0` for additional damping.
+```yaml
+zordi_joint_mit_controller:
+  ros__parameters:
+    command_interfaces: [position, velocity, effort]
+    compute_pd_internally: false  # MIT mode
+    default_kp: [100.0, 80.0]     # Gains per joint
+    default_kd: [10.0, 8.0]
+```
+
+**Validation:** If a controller claims `[position, velocity, effort]` without `[kp, kd]`, the hardware interface will **error out** to prevent misconfiguration.
+
+**MuJoCo Model:** Set `kv="0"` on position actuators to prevent interference when neutralized.
+
+See [examples/mit_motor](mujoco_ros2_control/examples/mit_motor/) for a complete working example.
 
 ## Usage
 

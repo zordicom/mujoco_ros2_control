@@ -27,7 +27,6 @@
 #include <thread>
 #include <mutex>
 
-#include "control_toolbox/pid.hpp"
 #include "hardware_interface/types/hardware_interface_type_values.hpp"
 #include "joint_limits/joint_limits.hpp"
 #include "mujoco_ros2_control/mujoco_system_interface.hpp"
@@ -48,11 +47,6 @@ namespace mujoco_ros2_control
 {
 // Forward declaration for optional viewer
 class MujocoRendering;
-constexpr char PARAM_KP[]{"_kp"};
-constexpr char PARAM_KI[]{"_ki"};
-constexpr char PARAM_KD[]{"_kd"};
-constexpr char PARAM_I_MAX[]{"_i_max"};
-constexpr char PARAM_I_MIN[]{"_i_min"};
 
 class MujocoSystem : public MujocoSystemInterface
 {
@@ -102,12 +96,18 @@ public:
     double max_velocity_command;
     double min_effort_command;
     double max_effort_command;
-    control_toolbox::Pid position_pid;
-    control_toolbox::Pid velocity_pid;
+
+    // MIT mode: dynamic gains from controller (True MIT mode support)
+    double kp_command{0.0};           // Dynamic stiffness from controller
+    double kd_command{0.0};           // Dynamic damping from controller
+
+    // Safety limits for gains (from URDF max_kp/max_kd params)
+    double max_kp{1000.0};            // Maximum allowed stiffness
+    double max_kd{100.0};             // Maximum allowed damping
+
     bool is_position_control_enabled{false};
     bool is_velocity_control_enabled{false};
     bool is_effort_control_enabled{false};
-    bool is_pid_enabled{false};
     joint_limits::JointLimits joint_limits;
     bool is_mimic{false};
     int mimicked_joint_index;
@@ -124,6 +124,8 @@ public:
     bool position_command_active{false};
     bool velocity_command_active{false};
     bool effort_command_active{false};
+    bool kp_command_active{false};    // True when controller claims kp interface
+    bool kd_command_active{false};    // True when controller claims kd interface
 
     // Warning flag to avoid spamming logs about kv != 0 in neutralized position actuators
     bool warned_about_position_kv{false};
@@ -161,8 +163,6 @@ private:
   bool load_keyframe(const hardware_interface::HardwareInfo &hardware_info);
   void get_joint_limits(
     urdf::JointConstSharedPtr urdf_joint, joint_limits::JointLimits &joint_limits);
-  control_toolbox::Pid get_pid_gains(
-    const hardware_interface::ComponentInfo &joint_info, std::string command_interface);
   double clamp(double v, double lo, double hi) { return (v < lo) ? lo : (hi < v) ? hi : v; }
 
   // Helper to create services and publishers (shared by both modes)

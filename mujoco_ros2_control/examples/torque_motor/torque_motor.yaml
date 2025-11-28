@@ -1,0 +1,47 @@
+# Torque Motor Example Controller Configuration
+# Uses ZordiJointController in effort-only mode with gravity compensation
+
+controller_manager:
+  ros__parameters:
+    update_rate: 1000
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    zordi_joint_effort_controller:
+      type: zordi_ros_controllers/ZordiJointController
+
+joint_state_broadcaster:
+  ros__parameters:
+    use_local_topics: false
+
+# ZordiJointController in effort-only mode
+# Controller computes PD and gravity compensation internally
+zordi_joint_effort_controller:
+  ros__parameters:
+    joints:
+      - joint1
+
+    # Effort-only: controller computes all torques
+    command_interfaces:
+      - effort
+
+    state_interfaces:
+      - position
+      - velocity
+
+    # Enable gravity compensation (critical for torque control!)
+    use_gravity_compensation: true
+
+    # Software PD mode: controller computes PD internally
+    compute_pd_internally: true
+
+    # Trajectory tolerances
+    constraints:
+      stopped_velocity_tolerance: 0.01
+      goal_time: 0.5
+
+    joint1:
+      trajectory: 0.1
+      goal: 0.05
+
