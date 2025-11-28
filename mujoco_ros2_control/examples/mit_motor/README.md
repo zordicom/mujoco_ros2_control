@@ -50,10 +50,12 @@ Uses `ZordiJointController` in MIT mode with gains from config:
 ```yaml
 zordi_joint_mit_controller:
   ros__parameters:
+    actuator_type: "mit"
     command_interfaces: [position, velocity, effort]
-    compute_pd_internally: false  # MIT mode
-    default_kp: [100.0]
-    default_kd: [10.0]
+    hardware_kp: [100.0]  # Sent to hardware
+    hardware_kd: [10.0]
+    software_kp: [0.0]    # Zero = hardware PD
+    software_kd: [0.0]
 ```
 
 ## Running the Example

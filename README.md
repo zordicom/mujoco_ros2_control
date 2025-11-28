@@ -176,8 +176,7 @@ ros2 topic echo /joint_states
 ## Documentation
 
 - [Complete Documentation](doc/updates.md) - Architecture, features, migration guides
-- [Simulation Control Guide](doc/SIMULATION_CONTROL.md) - Pause/unpause/reset functionality
-- [Real-Time Synchronization](doc/REAL_TIME_SYNC_FIX.md) - Control loop timing analysis
+- [Actuator Types Guide](mujoco_ros2_control/docs/ACTUATOR_TYPES.md) - Position servo, velocity, torque, MIT modes
 
 ## MuJoCo Model Requirements
 
@@ -236,10 +235,12 @@ MIT mode enables variable impedance control where the controller sends all 5 val
 ```yaml
 zordi_joint_mit_controller:
   ros__parameters:
+    actuator_type: "mit"
     command_interfaces: [position, velocity, effort]
-    compute_pd_internally: false  # MIT mode
-    default_kp: [100.0, 80.0]     # Gains per joint
-    default_kd: [10.0, 8.0]
+    hardware_kp: [100.0, 80.0]    # Gains sent to hardware
+    hardware_kd: [10.0, 8.0]
+    software_kp: [0.0, 0.0]       # Zero = hardware computes PD
+    software_kd: [0.0, 0.0]
 ```
 
 **Validation:** MIT mode (effort + position/velocity) requires `kp` and `kd` interfaces. Pure effort-only mode is allowed for motors like Dynamixel Current Mode.

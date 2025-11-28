@@ -227,12 +227,13 @@ Controller claims only the `effort` interface:
 ### Example Configuration
 
 ```yaml
-zordi_joint_effort_controller:
+zordi_joint_torque_motor_controller:
   ros__parameters:
+    actuator_type: "torque_motor"
     command_interfaces: [effort]
     state_interfaces: [position, velocity]
-    compute_pd_internally: true
-    use_gravity_compensation: true
+    software_kp: [100.0, 100.0, 80.0, 50.0, 30.0, 20.0, 10.0]
+    software_kd: [10.0, 10.0, 8.0, 5.0, 3.0, 2.0, 1.0]
 ```
 
 ### When to Use
@@ -317,13 +318,13 @@ MuJoCo model needs motor actuator (position/velocity actuators are neutralized):
 ```yaml
 zordi_joint_mit_controller:
   ros__parameters:
+    actuator_type: "mit"
     command_interfaces: [position, velocity, effort]
     state_interfaces: [position, velocity]
-    compute_pd_internally: false  # MIT mode
-    use_gravity_compensation: true
-    # Gains from controller config (not URDF)
-    default_kp: [100.0, 100.0, 80.0, 50.0, 30.0, 20.0, 10.0]
-    default_kd: [10.0, 10.0, 8.0, 5.0, 3.0, 2.0, 1.0]
+    hardware_kp: [100.0, 100.0, 80.0, 50.0, 30.0, 20.0, 10.0]  # Sent to hardware
+    hardware_kd: [10.0, 10.0, 8.0, 5.0, 3.0, 2.0, 1.0]
+    software_kp: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # Zero = hardware PD
+    software_kd: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 ```
 
 ### When to Use
@@ -392,6 +393,6 @@ Pure effort-only mode (Dynamixel Current Mode, Kuka iiwa) is allowed and does NO
 
 ---
 
-**Document Version:** 1.1
-**Last Updated:** 2025-05-28
+**Document Version:** 1.2
+**Last Updated:** 2025-11-28
 
