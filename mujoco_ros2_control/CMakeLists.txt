@@ -120,4 +120,21 @@ install(TARGETS
 )
 
 pluginlib_export_plugin_description_file(hardware_interface mujoco_system_plugins.xml)
+
+# Install examples and test files
+install(DIRECTORY
+  examples
+  test
+  DESTINATION share/${PROJECT_NAME}
+)
+
+# Testing
+if(BUILD_TESTING)
+  find_package(launch_testing_ament_cmake REQUIRED)
+  add_launch_test(test/test_interface_validation.test.py)
+  add_launch_test(test/test_position_servo.test.py)
+  add_launch_test(test/test_torque_motor.test.py)
+  add_launch_test(test/test_mit_motor.test.py)
+endif()
+
 ament_package()

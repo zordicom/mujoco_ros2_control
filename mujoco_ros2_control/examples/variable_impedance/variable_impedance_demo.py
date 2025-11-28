@@ -21,12 +21,13 @@ Note: This is a demonstration script. In production, you would implement
 a custom controller or action interface for dynamic gain changes.
 """
 
+import time
+
 import rclpy
+from builtin_interfaces.msg import Duration
 from rclpy.node import Node
 from std_msgs.msg import Float64MultiArray
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
-from builtin_interfaces.msg import Duration
-import time
 
 
 class VariableImpedanceDemo(Node):
@@ -37,14 +38,14 @@ class VariableImpedanceDemo(Node):
 
         # Publisher for trajectory commands
         self.trajectory_pub = self.create_publisher(
-            JointTrajectory,
-            "/zordi_joint_mit_controller/joint_trajectory",
-            10
+            JointTrajectory, "/zordi_joint_mit_controller/joint_trajectory", 10
         )
 
         self.get_logger().info("Variable Impedance Demo initialized")
         self.get_logger().info("=" * 60)
-        self.get_logger().info("This demo shows how MIT mode enables variable impedance.")
+        self.get_logger().info(
+            "This demo shows how MIT mode enables variable impedance."
+        )
         self.get_logger().info("The robot's stiffness changes during execution.")
         self.get_logger().info("=" * 60)
 
@@ -56,7 +57,9 @@ class VariableImpedanceDemo(Node):
         point = JointTrajectoryPoint()
         point.positions = positions
         point.velocities = [0.0]
-        point.time_from_start = Duration(sec=int(duration_sec), nanosec=int((duration_sec % 1) * 1e9))
+        point.time_from_start = Duration(
+            sec=int(duration_sec), nanosec=int((duration_sec % 1) * 1e9)
+        )
 
         msg.points = [point]
         self.trajectory_pub.publish(msg)
@@ -71,7 +74,9 @@ class VariableImpedanceDemo(Node):
         self.get_logger().info("")
 
         # Phase 1: Move to starting position with default stiffness
-        self.get_logger().info("Phase 1: Moving to starting position (default kp=100, kd=10)")
+        self.get_logger().info(
+            "Phase 1: Moving to starting position (default kp=100, kd=10)"
+        )
         self.send_trajectory([0.0], 2.0)
         time.sleep(3.0)
 
@@ -121,4 +126,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

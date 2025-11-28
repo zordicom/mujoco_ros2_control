@@ -1,0 +1,34 @@
+# Test configuration for actuator type validation
+# Uses forward_command_controller for simple command->response tests
+
+controller_manager:
+  ros__parameters:
+    update_rate: 1000
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    forward_position_controller:
+      type: forward_command_controller/ForwardCommandController
+
+    forward_effort_controller:
+      type: forward_command_controller/ForwardCommandController
+
+joint_state_broadcaster:
+  ros__parameters:
+    use_local_topics: false
+
+# Forward command controller for position interface
+forward_position_controller:
+  ros__parameters:
+    joints:
+      - joint1
+    interface_name: position
+
+# Forward command controller for effort interface
+forward_effort_controller:
+  ros__parameters:
+    joints:
+      - joint1
+    interface_name: effort
+

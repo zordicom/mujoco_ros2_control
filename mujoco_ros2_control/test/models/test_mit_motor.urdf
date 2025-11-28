@@ -1,0 +1,76 @@
+<?xml version="1.0"?>
+<!--
+MIT Motor Test URDF (headless)
+Demonstrates true MIT mode with all 5 command interfaces (like Damiao motors)
+-->
+<robot name="mit_motor_pendulum">
+  <link name="world"/>
+
+  <link name="base_link">
+    <visual>
+      <geometry><box size="0.1 0.1 0.1"/></geometry>
+      <material name="grey"><color rgba="0.5 0.5 0.5 1"/></material>
+    </visual>
+    <inertial>
+      <mass value="1.0"/>
+      <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+    </inertial>
+  </link>
+
+  <joint name="world_to_base" type="fixed">
+    <parent link="world"/>
+    <child link="base_link"/>
+    <origin xyz="0 0 0.5" rpy="0 0 0"/>
+  </joint>
+
+  <link name="pendulum">
+    <visual>
+      <origin xyz="0 0 -0.25" rpy="0 0 0"/>
+      <geometry><cylinder radius="0.02" length="0.5"/></geometry>
+      <material name="green"><color rgba="0.2 0.8 0.2 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 -0.25" rpy="0 0 0"/>
+      <geometry><cylinder radius="0.02" length="0.5"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 -0.25" rpy="0 0 0"/>
+      <mass value="1.0"/>
+      <inertia ixx="0.021" ixy="0" ixz="0" iyy="0.021" iyz="0" izz="0.001"/>
+    </inertial>
+  </link>
+
+  <joint name="joint1" type="revolute">
+    <parent link="base_link"/>
+    <child link="pendulum"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-3.14" upper="3.14" effort="50.0" velocity="10.0"/>
+  </joint>
+
+  <!-- ROS2 Control: All 5 MIT interfaces -->
+  <ros2_control name="mit_motor" type="system">
+    <hardware>
+      <plugin>mujoco_ros2_control/MujocoSystem</plugin>
+      <param name="mujoco_model">test/models/test_mit_motor.xml</param>
+      <param name="mujoco_model_package">mujoco_ros2_control</param>
+      <param name="mujoco_viewer">false</param>
+    </hardware>
+
+    <joint name="joint1">
+      <!-- MIT motor: all 5 command interfaces -->
+      <command_interface name="position"/>
+      <command_interface name="velocity"/>
+      <command_interface name="effort"/>
+      <command_interface name="kp"/>
+      <command_interface name="kd"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+      <!-- Safety limits for gains -->
+      <param name="max_kp">500</param>
+      <param name="max_kd">50</param>
+    </joint>
+  </ros2_control>
+</robot>
+
