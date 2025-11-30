@@ -127,8 +127,8 @@ public:
     bool kp_command_active{false};    // True when controller claims kp interface
     bool kd_command_active{false};    // True when controller claims kd interface
 
-    // Warning flag to avoid spamming logs about kv != 0 in neutralized position actuators
-    bool warned_about_position_kv{false};
+    // Warning flags to avoid spamming logs
+    bool warned_about_position_kv{false};   // kv != 0 in neutralized position actuators
   };
 
   template <typename T>
@@ -247,6 +247,16 @@ private:
   double camera_publish_rate_{6.0};
   int camera_counter_{0};
   int camera_interval_{10};
+
+  // Shared simulation state (Singleton pattern)
+  static std::mutex static_mutex_;
+  static mjModel* shared_model_;
+  static mjData* shared_data_;
+  static int instance_count_;
+  static rclcpp::Node::SharedPtr shared_node_;
+  static std::string shared_model_path_;
+
+  bool is_primary_{false};  // True if this instance is responsible for stepping simulation
 };
 }  // namespace mujoco_ros2_control
 

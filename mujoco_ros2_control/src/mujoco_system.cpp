@@ -34,21 +34,23 @@
 
 namespace mujoco_ros2_control
 {
+// Static members initialization
+std::mutex MujocoSystem::static_mutex_;
+mjModel* MujocoSystem::shared_model_ = nullptr;
+mjData* MujocoSystem::shared_data_ = nullptr;
+int MujocoSystem::instance_count_ = 0;
+rclcpp::Node::SharedPtr MujocoSystem::shared_node_ = nullptr;
+std::string MujocoSystem::shared_model_path_ = "";
+
 MujocoSystem::MujocoSystem() : logger_(rclcpp::get_logger("")) {}
 
 MujocoSystem::~MujocoSystem()
 {
   // Ensure viewer thread is stopped and joined before destruction
-  // This prevents std::terminate() if destructor is called without on_cleanup()
   if (viewer_thread_.joinable()) {
-    // Signal the viewer thread to stop
-    // The thread handles its own GLFW cleanup (glfwTerminate) when it exits
     stop_viewer_ = true;
     viewer_thread_.join();
   }
-
-  // NOTE: Don't call rendering_->close() here - the viewer thread already
-  // called glfwTerminate() when it exited, so any GLFW calls would be invalid.
 
   // Ensure executor thread is stopped
   if (executor_) {
@@ -58,13 +60,27 @@ MujocoSystem::~MujocoSystem()
     executor_thread_.join();
   }
 
-  // Free MuJoCo resources if not already freed
-  if (mj_data_) {
-    mj_deleteData(mj_data_);
+  // Free MuJoCo resources ONLY if this is the last instance
+  std::lock_guard<std::mutex> lock(static_mutex_);
+  instance_count_--;
+
+  if (instance_count_ <= 0) {
+    // Last instance exiting, clean up shared resources
+    if (mj_data_) {
+      mj_deleteData(mj_data_);
+      mj_data_ = nullptr;
+      shared_data_ = nullptr;
+    }
+    if (mj_model_) {
+      mj_deleteModel(mj_model_);
+      mj_model_ = nullptr;
+      shared_model_ = nullptr;
+    }
+    shared_node_.reset();
+    shared_model_path_ = "";
+  } else {
+    // Just clear local pointers
     mj_data_ = nullptr;
-  }
-  if (mj_model_) {
-    mj_deleteModel(mj_model_);
     mj_model_ = nullptr;
   }
 }
@@ -76,7 +92,7 @@ CallbackReturn MujocoSystem::on_init(const hardware_interface::HardwareInfo& inf
 
   logger_ = rclcpp::get_logger("mujoco_system");
 
-  // Parse mujoco_model + mujoco_model_package (picknik-style params)
+  // Parse mujoco_model + mujoco_model_package
   auto model_it = info_.hardware_parameters.find("mujoco_model");
   auto pkg_it = info_.hardware_parameters.find("mujoco_model_package");
 
@@ -86,9 +102,11 @@ CallbackReturn MujocoSystem::on_init(const hardware_interface::HardwareInfo& inf
     return CallbackReturn::ERROR;
   }
 
+  std::string model_path;
   try {
     std::string pkg_share = ament_index_cpp::get_package_share_directory(pkg_it->second);
-    mujoco_model_path_ = pkg_share + "/" + model_it->second;
+    model_path = pkg_share + "/" + model_it->second;
+    mujoco_model_path_ = model_path;
     RCLCPP_INFO(logger_, "MuJoCo model path: %s", mujoco_model_path_.c_str());
   } catch (const std::exception& e) {
     RCLCPP_ERROR(logger_, "Failed to resolve package '%s': %s",
@@ -112,20 +130,52 @@ CallbackReturn MujocoSystem::on_init(const hardware_interface::HardwareInfo& inf
   auto viewer_it = info_.hardware_parameters.find("mujoco_viewer");
   if (viewer_it != info_.hardware_parameters.end() && viewer_it->second == "true") {
     mujoco_viewer_ = true;
-    RCLCPP_INFO(logger_, "Interactive viewer will be enabled in on_configure()");
   }
 
-  // Load MuJoCo model (needed for joint registration before export_*_interfaces())
-  char error[1000];
-  mj_model_ = mj_loadXML(mujoco_model_path_.c_str(), 0, error, 1000);
-  if (!mj_model_) {
-    RCLCPP_ERROR(logger_, "Failed to load model: %s", error);
-    return CallbackReturn::ERROR;
-  }
-  mj_data_ = mj_makeData(mj_model_);
+  // ---------------------------------------------------------
+  // Shared Model Logic (Singleton)
+  // ---------------------------------------------------------
+  std::lock_guard<std::mutex> lock(static_mutex_);
 
-  RCLCPP_INFO(logger_, "MuJoCo model loaded: nq=%d nv=%d nu=%d",
-              mj_model_->nq, mj_model_->nv, mj_model_->nu);
+  if (shared_model_ == nullptr) {
+    // First instance: Load model and become PRIMARY
+    char error[1000];
+    shared_model_ = mj_loadXML(mujoco_model_path_.c_str(), 0, error, 1000);
+    if (!shared_model_) {
+      RCLCPP_ERROR(logger_, "Failed to load model: %s", error);
+      return CallbackReturn::ERROR;
+    }
+    shared_data_ = mj_makeData(shared_model_);
+    shared_model_path_ = mujoco_model_path_;
+
+    // Create shared ROS node
+    shared_node_ = rclcpp::Node::make_shared("mujoco_system");
+    shared_node_->set_parameter(rclcpp::Parameter("use_sim_time", false));
+
+    is_primary_ = true;
+    RCLCPP_INFO(logger_, "Initialized PRIMARY instance (shared model created)");
+    RCLCPP_INFO(logger_, "MuJoCo model loaded: nq=%d nv=%d nu=%d",
+                shared_model_->nq, shared_model_->nv, shared_model_->nu);
+  } else {
+    // Subsequent instances: Reuse model and become SECONDARY
+    // Verify model path matches (basic safety check)
+    if (mujoco_model_path_ != shared_model_path_) {
+      RCLCPP_ERROR(logger_,
+        "Model path mismatch! Shared model is '%s', but this instance requested '%s'. "
+        "All hardware interfaces must use the same MuJoCo model file.",
+        shared_model_path_.c_str(), mujoco_model_path_.c_str());
+      return CallbackReturn::ERROR;
+    }
+
+    is_primary_ = false;
+    RCLCPP_INFO(logger_, "Initialized SECONDARY instance (reusing shared model)");
+  }
+
+  // Use shared resources
+  mj_model_ = shared_model_;
+  mj_data_ = shared_data_;
+  node_ = shared_node_;
+  instance_count_++;
 
   // Parse URDF model
   urdf::Model urdf;
@@ -144,11 +194,12 @@ CallbackReturn MujocoSystem::on_init(const hardware_interface::HardwareInfo& inf
 }
 
 void MujocoSystem::create_services_and_publishers() {
-  // Create ROS node if not exists
-  if (!node_) {
-    node_ = rclcpp::Node::make_shared("mujoco_system");
-    node_->set_parameter(rclcpp::Parameter("use_sim_time", false));  // We ARE sim time
+  // ONLY the primary instance creates global services and publishers
+  if (!is_primary_) {
+    return;
   }
+
+  // Node is already created in on_init (shared_node_)
 
   // Clock publisher
   if (!clock_publisher_) {
@@ -197,13 +248,13 @@ void MujocoSystem::create_services_and_publishers() {
 }
 
 CallbackReturn MujocoSystem::on_configure(const rclcpp_lifecycle::State& /* prev */) {
-  RCLCPP_INFO(logger_, "Configuring MujocoSystem...");
+  RCLCPP_INFO(logger_, "Configuring MujocoSystem (%s)...", is_primary_ ? "PRIMARY" : "SECONDARY");
 
-  // Create services and publishers
+  // Create services and publishers (primary only)
   create_services_and_publishers();
 
-  // Initialize cameras if enabled
-  if (enable_cameras_) {
+  // Initialize cameras if enabled (primary only - cameras belong to scene)
+  if (is_primary_ && enable_cameras_) {
     cameras_ = std::make_unique<MujocoCameras>(node_);
     cameras_->init(mj_model_);
 
@@ -213,8 +264,8 @@ CallbackReturn MujocoSystem::on_configure(const rclcpp_lifecycle::State& /* prev
     RCLCPP_INFO(logger_, "Cameras initialized: publishing every %d steps", camera_interval_);
   }
 
-  // Initialize viewer if enabled (AFTER simple node creation - old working pattern)
-  if (mujoco_viewer_) {
+  // Initialize viewer if enabled (primary only - one viewer for the scene)
+  if (is_primary_ && mujoco_viewer_) {
     RCLCPP_INFO(logger_, "Starting interactive viewer thread...");
 
     // Start viewer thread - do ALL GLFW/OpenGL init inside thread for proper context handling
@@ -294,33 +345,31 @@ CallbackReturn MujocoSystem::on_deactivate(const rclcpp_lifecycle::State& /* pre
 }
 
 CallbackReturn MujocoSystem::on_cleanup(const rclcpp_lifecycle::State& /* prev */) {
-  RCLCPP_INFO(logger_, "Cleaning up MujocoSystem...");
+  RCLCPP_INFO(logger_, "Cleaning up MujocoSystem (%s)...", is_primary_ ? "PRIMARY" : "SECONDARY");
 
-  // Stop viewer thread if running - the thread handles its own cleanup
-  // (calls rendering_->close() and glfwTerminate() when it exits)
-  if (viewer_thread_.joinable()) {
+  // Stop viewer thread if running (PRIMARY only owns the viewer)
+  if (is_primary_ && viewer_thread_.joinable()) {
     stop_viewer_ = true;
     viewer_thread_.join();
     RCLCPP_INFO(logger_, "Viewer thread stopped");
   }
 
-  // Stop executor thread
-  if (executor_) {
-    executor_->cancel();
-  }
-  if (executor_thread_.joinable()) {
-    executor_thread_.join();
+  // Stop executor thread (PRIMARY only owns the executor)
+  if (is_primary_) {
+    if (executor_) {
+      executor_->cancel();
+    }
+    if (executor_thread_.joinable()) {
+      executor_thread_.join();
+    }
   }
 
-  // Always free MuJoCo resources (we always own them)
-  if (mj_data_) {
-    mj_deleteData(mj_data_);
-    mj_data_ = nullptr;
-  }
-  if (mj_model_) {
-    mj_deleteModel(mj_model_);
-    mj_model_ = nullptr;
-  }
+  // NOTE: Do NOT free mj_model_/mj_data_ here!
+  // These are shared resources managed by the singleton pattern.
+  // They are freed in the destructor when instance_count_ drops to 0.
+  // Just clear the local pointers.
+  mj_data_ = nullptr;
+  mj_model_ = nullptr;
 
   return CallbackReturn::SUCCESS;
 }
@@ -338,7 +387,115 @@ std::vector<hardware_interface::CommandInterface> MujocoSystem::export_command_i
 hardware_interface::return_type MujocoSystem::read(
   const rclcpp::Time & /* time */, const rclcpp::Duration & /* period */)
 {
-  // Joint states
+  // ----------------------------------------------------------------
+  // PRIMARY INSTANCE: STEP SIMULATION (moved from write)
+  // ----------------------------------------------------------------
+  // We step in read() to ensure commands from ALL interfaces (written in previous cycle)
+  // are applied together. This introduces a 1-cycle delay for secondary interfaces,
+  // which is standard for distributed hardware architectures.
+  if (is_primary_)
+  {
+    // ALWAYS handle stepping, pause, services
+    // Check for pending keyframe reset
+    {
+      std::lock_guard<std::mutex> lock(reset_mutex_);
+      if (pending_reset_.pending) {
+        reset_to_keyframe(pending_reset_.keyframe);
+        pending_reset_.pending = false;
+
+        // CRITICAL: Re-neutralize actuators after keyframe reset!
+        // The ctrl values were set above based on the OLD positions before reset.
+        // After keyframe reset, positions change, so we must update ctrl to match.
+        for (auto &joint_state : joint_states_) {
+          const double q = mj_data_->qpos[joint_state.mj_pos_adr];
+          const double qd = mj_data_->qvel[joint_state.mj_vel_adr];
+
+          // Neutralize position actuator to new position
+          if (joint_state.mj_pos_actuator_id >= 0 &&
+              joint_state.mj_pos_actuator_id < mj_model_->nu) {
+            mj_data_->ctrl[joint_state.mj_pos_actuator_id] = q;
+          }
+          // Neutralize velocity actuator to new velocity
+          if (joint_state.mj_vel_actuator_id >= 0 &&
+              joint_state.mj_vel_actuator_id < mj_model_->nu) {
+            mj_data_->ctrl[joint_state.mj_vel_actuator_id] = qd;
+          }
+          // Zero torque actuator
+          if (joint_state.mj_tau_actuator_id >= 0 &&
+              joint_state.mj_tau_actuator_id < mj_model_->nu) {
+            mj_data_->ctrl[joint_state.mj_tau_actuator_id] = 0.0;
+          }
+        }
+        RCLCPP_INFO(logger_, "Keyframe reset: re-neutralized all actuators");
+      }
+    }
+
+    // Check if paused
+    bool is_paused;
+    {
+      std::lock_guard<std::mutex> lock(sim_state_mutex_);
+      is_paused = (sim_state_ == SimulationState::PAUSED);
+    }
+
+    if (is_paused) {
+      // Paused: Update derived quantities without advancing time
+      mj_forward(mj_model_, mj_data_);
+    }
+    else {
+      // Step simulation
+      mj_step1(mj_model_, mj_data_);
+
+      // Apply external wrench if active
+      {
+        std::lock_guard<std::mutex> lock(wrench_mutex_);
+        if (active_wrench_.active && active_wrench_.body_id >= 0) {
+          mjtNum* xfrc = &mj_data_->xfrc_applied[6 * active_wrench_.body_id];
+          double now = mj_data_->time;
+
+          if (now <= active_wrench_.end_time) {
+            xfrc[0] = active_wrench_.fx;
+            xfrc[1] = active_wrench_.fy;
+            xfrc[2] = active_wrench_.fz;
+            xfrc[3] = active_wrench_.tx;
+            xfrc[4] = active_wrench_.ty;
+            xfrc[5] = active_wrench_.tz;
+          } else {
+            // Expired, clear
+            for (int i = 0; i < 6; i++) xfrc[i] = 0.0;
+            active_wrench_.active = false;
+          }
+        }
+      }
+
+      mj_step2(mj_model_, mj_data_);
+    }
+
+    // Publish clock
+    double sim_time = mj_data_->time;
+    int sec = static_cast<int>(sim_time);
+    int nsec = static_cast<int>((sim_time - sec) * 1e9);
+    rosgraph_msgs::msg::Clock clock_msg;
+    clock_msg.clock = rclcpp::Time(sec, nsec, RCL_ROS_TIME);
+    clock_publisher_->publish(clock_msg);
+
+    // Publish qfrc_bias
+    std_msgs::msg::Float64MultiArray qfrc_msg;
+    qfrc_msg.data.resize(mj_model_->nv);
+    for (int i = 0; i < mj_model_->nv; i++) {
+      qfrc_msg.data[i] = mj_data_->qfrc_bias[i];
+    }
+    qfrc_bias_publisher_->publish(qfrc_msg);
+
+    // Update cameras
+    if (cameras_) {
+      if (++camera_counter_ >= camera_interval_) {
+        cameras_->update(mj_model_, mj_data_);
+        camera_counter_ = 0;
+      }
+    }
+  } // End if (is_primary_)
+
+  // Joint states (ALL instances read from shared data)
   for (auto &joint_state : joint_states_)
   {
     joint_state.position = mj_data_->qpos[joint_state.mj_pos_adr];
@@ -419,22 +576,47 @@ hardware_interface::return_type MujocoSystem::write(
 
     // Do not clear qfrc_applied here; reserve it for explicit fallback/diagnostics only
 
-    // Determine if MIT mode is active (position/velocity commands with effort)
-    // In MIT mode, we neutralize position/velocity actuators and drive torque actuator with PD
+    // =======================================================================
+    // Control Mode Detection and Actuator Driving
+    // =======================================================================
     //
-    // Use *_command_active flags set by perform_command_mode_switch() to detect
-    // which interfaces are actually claimed by controllers (not just exposed)
+    // MODE 1: Position Servo (only position claimed)
+    //   - Drive position actuator with position_command
+    //   - MuJoCo's fixed kp/kv handle the PD control
+    //   - Neutralize velocity/torque actuators
+    //
+    // MODE 2: Position+Velocity Servo (position + velocity claimed, no effort)
+    //   - Drive position actuator with position_command (MuJoCo kp)
+    //   - Drive velocity actuator with velocity_command (MuJoCo kv)
+    //   - Neutralize torque actuator
+    //
+    // MODE 3: Pure Torque Motor (only effort claimed)
+    //   - Neutralize position/velocity actuators
+    //   - Drive torque actuator with effort_command (direct passthrough)
+    //   - Controller computes all dynamics internally
+    //
+    // MODE 4: MIT Mode (effort + position + velocity + kp + kd claimed)
+    //   - Neutralize position/velocity actuators (they have fixed gains)
+    //   - Compute PD using DYNAMIC kp/kd from controller
+    //   - τ = effort_command + kp*(pos_cmd - q) + kd*(vel_cmd - qd)
+    //   - This matches real MIT motors (Damiao, Unitree, etc.)
+    //
+    // =======================================================================
+
+    // Detect MIT mode: effort + (position OR velocity) + kp + kd all claimed
+    // In MIT mode, we compute PD in software using dynamic gains
     bool mit_mode = joint_state.effort_command_active &&
-                    (joint_state.position_command_active || joint_state.velocity_command_active);
+                    (joint_state.position_command_active || joint_state.velocity_command_active) &&
+                    joint_state.kp_command_active && joint_state.kd_command_active;
 
-
-    // Position actuator: command, neutralize, or neutralize for MIT
+    // Position actuator control
     if (joint_state.mj_pos_actuator_id >= 0 &&
         joint_state.mj_pos_actuator_id < mj_model_->nu)
     {
       if (joint_state.position_command_active && !mit_mode)
       {
-        // Pure position mode: drive position actuator
+        // Position Servo or Position+Velocity mode: drive with commanded position
+        // MuJoCo's position actuator applies its fixed kp
         double pos_cmd = joint_state.position_command;
         if (joint_state.joint_limits.has_position_limits)
         {
@@ -447,211 +629,75 @@ hardware_interface::return_type MujocoSystem::write(
       }
       else
       {
-        // Neutralize: either not claimed or MIT mode
+        // Neutralize: MIT mode, Pure Torque mode, or not claimed
         // For MuJoCo position actuators: τ = kp*(ctrl - q)
         // To achieve zero torque: ctrl = q
         mj_data_->ctrl[joint_state.mj_pos_actuator_id] = q;
-
-        // Check if position interface is exposed but not active, and kv != 0
-        if (joint_state.is_position_control_enabled &&
-            !joint_state.position_command_active &&
-            !joint_state.warned_about_position_kv)
-        {
-          const int act_id = joint_state.mj_pos_actuator_id;
-
-          // Read kv using same logic as initialization
-          // For biastype=1: kv = -biasprm[2], otherwise kv = gainprm[1]
-          const double kv = (mj_model_->actuator_biastype[act_id] == 1) ?
-                            -mj_model_->actuator_biasprm[act_id * 10 + 2] :
-                            mj_model_->actuator_gainprm[act_id * 10 + 1];
-
-          if (std::abs(kv) > 1e-6)
-          {
-            RCLCPP_WARN(
-              logger_,
-              "Joint '%s': Position actuator has kv=%.3f but position interface is not active. "
-              "This will introduce unwanted damping torque (τ = -%.3f * qd) during neutralization. "
-              "For proper MIT mode operation, set kv=0.0 in the MuJoCo model.",
-              joint_state.name.c_str(), kv, kv);
-            joint_state.warned_about_position_kv = true;
-          }
-        }
       }
     }
 
-    // Velocity actuator: command, neutralize, or neutralize for MIT
+    // Velocity actuator control
     if (joint_state.mj_vel_actuator_id >= 0 &&
         joint_state.mj_vel_actuator_id < mj_model_->nu)
     {
       if (joint_state.velocity_command_active && !mit_mode)
       {
-        // Pure velocity mode: drive velocity actuator
+        // Position+Velocity mode: drive with commanded velocity
+        // MuJoCo's velocity actuator applies its fixed kv
         mj_data_->ctrl[joint_state.mj_vel_actuator_id] = joint_state.velocity_command;
       }
       else
       {
-        // Neutralize: either not claimed or MIT mode
+        // Neutralize: MIT mode, Pure Torque mode, or not claimed
+        // For MuJoCo velocity actuators: τ = kv*(ctrl - qd)
+        // To achieve zero torque: ctrl = qd
         mj_data_->ctrl[joint_state.mj_vel_actuator_id] = qd;
       }
     }
 
-    // Torque actuator: command or neutralize
-    // MIT-style: if position/velocity commands are active, compute PD torque and add to effort_command
-    // True MIT mode: kp/kd come from controller via command interfaces (not fixed URDF values)
+    // Torque actuator control
     if (joint_state.mj_tau_actuator_id >= 0 &&
         joint_state.mj_tau_actuator_id < mj_model_->nu)
     {
       if (joint_state.effort_command_active)
       {
-        double tau_total = joint_state.effort_command;
+        double tau_cmd = joint_state.effort_command;
 
-        // MIT-style PD composition: add PD torque if position or velocity commands are active
-        // Uses dynamic gains from kp/kd command interfaces (true MIT mode)
-        if (joint_state.position_command_active || joint_state.velocity_command_active)
+        // MIT Mode: compute PD using dynamic kp/kd from controller
+        // τ = τ_ff + kp*(pos_cmd - q) + kd*(vel_cmd - qd)
+        if (mit_mode)
         {
-          double tau_pd = 0.0;
+          double kp = clamp(joint_state.kp_command, 0.0, joint_state.max_kp);
+          double kd = clamp(joint_state.kd_command, 0.0, joint_state.max_kd);
 
-          // Position PD term (kp * position_error)
-          // Use dynamic kp from controller, clamped to safety limit
-          if (joint_state.position_command_active && joint_state.kp_command_active)
+          double pos_err = joint_state.position_command - q;
+          double vel_err = joint_state.velocity_command - qd;
+
+          tau_cmd += kp * pos_err + kd * vel_err;
+
+          // Debug logging (throttled)
+          static int mit_debug_count = 0;
+          if (mit_debug_count % 10000 == 0)
           {
-            double pos_err = joint_state.position_command - q;
-            double kp = clamp(joint_state.kp_command, 0.0, joint_state.max_kp);
-            tau_pd += kp * pos_err;
-
-            // Debug: log MIT mode PD computation (throttled)
-            static int mit_debug_count = 0;
-            if (mit_debug_count % 10000 == 0 && joint_state.name.find("right_joint1") != std::string::npos)
-            {
-              RCLCPP_INFO(logger_,
-                "MIT PD [%s]: pos_cmd=%.3f, q=%.3f, err=%.3f, kp=%.1f, tau_pd=%.2f, tau_ff=%.2f",
-                joint_state.name.c_str(), joint_state.position_command, q, pos_err,
-                kp, tau_pd, joint_state.effort_command);
-            }
-            mit_debug_count++;
+            RCLCPP_DEBUG(logger_,
+              "MIT [%s]: pos_cmd=%.3f, q=%.3f, kp=%.1f, kd=%.1f, tau=%.2f",
+              joint_state.name.c_str(), joint_state.position_command, q, kp, kd, tau_cmd);
           }
-
-          // Velocity PD term (kd * velocity_error)
-          // Use dynamic kd from controller, clamped to safety limit
-          if (joint_state.velocity_command_active && joint_state.kd_command_active)
-          {
-            double vel_err = joint_state.velocity_command - qd;
-            double kd = clamp(joint_state.kd_command, 0.0, joint_state.max_kd);
-            tau_pd += kd * vel_err;
-          }
-
-          tau_total += tau_pd;
+          mit_debug_count++;
         }
 
         const double limit = joint_state.joint_limits.max_effort;
-        mj_data_->ctrl[joint_state.mj_tau_actuator_id] =
-          clamp(tau_total, -limit, limit);
+        mj_data_->ctrl[joint_state.mj_tau_actuator_id] = clamp(tau_cmd, -limit, limit);
       }
       else
       {
+        // Effort interface not claimed: zero torque
         mj_data_->ctrl[joint_state.mj_tau_actuator_id] = 0.0;
       }
     }
   }
 
-  // ALWAYS handle stepping, pause, services (both modes use plugin now)
-  // Check for pending keyframe reset
-  {
-    std::lock_guard<std::mutex> lock(reset_mutex_);
-    if (pending_reset_.pending) {
-      reset_to_keyframe(pending_reset_.keyframe);
-      pending_reset_.pending = false;
-
-      // CRITICAL: Re-neutralize actuators after keyframe reset!
-      // The ctrl values were set above based on the OLD positions before reset.
-      // After keyframe reset, positions change, so we must update ctrl to match.
-      for (auto &joint_state : joint_states_) {
-        const double q = mj_data_->qpos[joint_state.mj_pos_adr];
-        const double qd = mj_data_->qvel[joint_state.mj_vel_adr];
-
-        // Neutralize position actuator to new position
-        if (joint_state.mj_pos_actuator_id >= 0 &&
-            joint_state.mj_pos_actuator_id < mj_model_->nu) {
-          mj_data_->ctrl[joint_state.mj_pos_actuator_id] = q;
-        }
-        // Neutralize velocity actuator to new velocity
-        if (joint_state.mj_vel_actuator_id >= 0 &&
-            joint_state.mj_vel_actuator_id < mj_model_->nu) {
-          mj_data_->ctrl[joint_state.mj_vel_actuator_id] = qd;
-        }
-        // Zero torque actuator
-        if (joint_state.mj_tau_actuator_id >= 0 &&
-            joint_state.mj_tau_actuator_id < mj_model_->nu) {
-          mj_data_->ctrl[joint_state.mj_tau_actuator_id] = 0.0;
-        }
-      }
-      RCLCPP_INFO(logger_, "Keyframe reset: re-neutralized all actuators");
-    }
-  }
-
-  // Check if paused
-  bool is_paused;
-  {
-    std::lock_guard<std::mutex> lock(sim_state_mutex_);
-    is_paused = (sim_state_ == SimulationState::PAUSED);
-  }
-
-  if (is_paused) {
-    // Paused: Update derived quantities without advancing time
-    mj_forward(mj_model_, mj_data_);
-    return hardware_interface::return_type::OK;
-  }
-
-  // Step simulation
-  mj_step1(mj_model_, mj_data_);
-
-  // Apply external wrench if active
-  {
-    std::lock_guard<std::mutex> lock(wrench_mutex_);
-    if (active_wrench_.active && active_wrench_.body_id >= 0) {
-      mjtNum* xfrc = &mj_data_->xfrc_applied[6 * active_wrench_.body_id];
-      double now = mj_data_->time;
-
-      if (now <= active_wrench_.end_time) {
-        xfrc[0] = active_wrench_.fx;
-        xfrc[1] = active_wrench_.fy;
-        xfrc[2] = active_wrench_.fz;
-        xfrc[3] = active_wrench_.tx;
-        xfrc[4] = active_wrench_.ty;
-        xfrc[5] = active_wrench_.tz;
-      } else {
-        // Expired, clear
-        for (int i = 0; i < 6; i++) xfrc[i] = 0.0;
-        active_wrench_.active = false;
-      }
-    }
-  }
-
-  mj_step2(mj_model_, mj_data_);
-
-  // Publish clock
-  double sim_time = mj_data_->time;
-  int sec = static_cast<int>(sim_time);
-  int nsec = static_cast<int>((sim_time - sec) * 1e9);
-  rosgraph_msgs::msg::Clock clock_msg;
-  clock_msg.clock = rclcpp::Time(sec, nsec, RCL_ROS_TIME);
-  clock_publisher_->publish(clock_msg);
-
-  // Publish qfrc_bias
-  std_msgs::msg::Float64MultiArray qfrc_msg;
-  qfrc_msg.data.resize(mj_model_->nv);
-  for (int i = 0; i < mj_model_->nv; i++) {
-    qfrc_msg.data[i] = mj_data_->qfrc_bias[i];
-  }
-  qfrc_bias_publisher_->publish(qfrc_msg);
-
-  // Update cameras
-  if (cameras_) {
-    if (++camera_counter_ >= camera_interval_) {
-      cameras_->update(mj_model_, mj_data_);
-      camera_counter_ = 0;
-    }
-  }
+  // MJ_STEP MOVED TO READ() for primary instance to synchronize writes
 
   return hardware_interface::return_type::OK;
 }
@@ -758,24 +804,43 @@ hardware_interface::return_type MujocoSystem::perform_command_mode_switch(
     }
   }
 
-  // Validate MIT mode: if effort + (position or velocity) are claimed, kp/kd MUST also be claimed
-  // This prevents misconfiguration where MIT-style control is expected but gains are missing
-  // Pure effort-only mode (Dynamixel Current Mode, Kuka iiwa) is allowed without kp/kd
+  // Log the control mode for each joint based on claimed interfaces
   for (const auto &joint_state : joint_states_)
   {
-    bool mit_intent = joint_state.effort_command_active &&
-                      (joint_state.position_command_active || joint_state.velocity_command_active);
+    // MIT mode detection: effort + (position OR velocity) + kp + kd
+    bool mit_mode = joint_state.effort_command_active &&
+                    (joint_state.position_command_active || joint_state.velocity_command_active) &&
+                    joint_state.kp_command_active && joint_state.kd_command_active;
 
-    if (mit_intent && (!joint_state.kp_command_active || !joint_state.kd_command_active))
+    std::string mode;
+    if (mit_mode)
     {
-      RCLCPP_ERROR(logger_,
-        "Joint '%s': MIT mode detected (effort + position/velocity claimed) but kp/kd interfaces "
-        "not claimed. MIT mode requires all 5 interfaces: [position, velocity, effort, kp, kd]. "
-        "For pure torque mode (Dynamixel Current Mode), claim only [effort]. "
-        "For position servo mode, claim only [position].",
-        joint_state.name.c_str());
-      return hardware_interface::return_type::ERROR;
+      mode = "MIT mode (dynamic kp/kd, software PD)";
     }
+    else if (joint_state.effort_command_active && !joint_state.position_command_active &&
+             !joint_state.velocity_command_active)
+    {
+      mode = "Pure torque motor (effort only)";
+    }
+    else if (joint_state.position_command_active && joint_state.velocity_command_active &&
+             !joint_state.effort_command_active)
+    {
+      mode = "Position+Velocity servo (MuJoCo PD)";
+    }
+    else if (joint_state.position_command_active && !joint_state.effort_command_active)
+    {
+      mode = "Position servo (MuJoCo PD)";
+    }
+    else if (joint_state.velocity_command_active && !joint_state.effort_command_active)
+    {
+      mode = "Velocity servo";
+    }
+    else
+    {
+      mode = "Mixed/custom";
+    }
+
+    RCLCPP_INFO(logger_, "Joint '%s' control mode: %s", joint_state.name.c_str(), mode.c_str());
   }
 
   return hardware_interface::return_type::OK;

@@ -23,7 +23,7 @@ import launch_testing.markers
 import pytest
 import rclpy
 from ament_index_python.packages import get_package_share_directory
-from mujoco_ros2_control_msgs.srv import SimulationControl
+from mujoco_ros2_control_msgs.srv import ResetToKeyframe, SimulationControl
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64MultiArray
 
@@ -171,6 +171,26 @@ class TestTorqueMotor(unittest.TestCase):
             request,
         )
 
+    def _pause_simulation(self):
+        """Pause the MuJoCo simulation."""
+        request = SimulationControl.Request()
+        request.command = "pause"
+        return self._call_service(
+            SimulationControl,
+            "/mujoco_system/simulation_control",
+            request,
+        )
+
+    def _reset_to_keyframe(self, keyframe: str):
+        """Reset the MuJoCo simulation to a specific keyframe."""
+        request = ResetToKeyframe.Request()
+        request.keyframe = keyframe
+        return self._call_service(
+            ResetToKeyframe,
+            "/mujoco_system/reset_to_keyframe",
+            request,
+        )
+
     def test_gravity_response(self):
         """Test that pendulum falls with zero torque (no internal PD)."""
         # Wait for joint states
@@ -179,11 +199,17 @@ class TestTorqueMotor(unittest.TestCase):
             "Joint states not received",
         )
 
-        # Unpause simulation
-        self._unpause_simulation()
-        self._wait_with_spin(1.0)
+        # Pause simulation first
+        self._pause_simulation()
+        self._wait_with_spin(0.5)
 
-        # Get initial position
+        # Reset to tilted keyframe (qpos=0.5 rad = ~29 degrees)
+        # This puts the pendulum at a non-equilibrium position so gravity will act
+        self._reset_to_keyframe("tilted")
+        self._wait_with_spin(0.5)
+
+        # Get initial position (should be ~1.57 rad)
+        rclpy.spin_once(self.node, timeout_sec=0.1)
         initial_pos = self.joint_states.position[0]
 
         # Send zero torque command
@@ -193,6 +219,9 @@ class TestTorqueMotor(unittest.TestCase):
         for _ in range(10):
             self.cmd_pub.publish(cmd)
             self._wait_with_spin(0.1)
+
+        # Unpause simulation - pendulum should fall under gravity
+        self._unpause_simulation()
 
         # Wait for gravity to act
         self._wait_with_spin(2.0)
@@ -207,8 +236,8 @@ class TestTorqueMotor(unittest.TestCase):
         print_result_box(
             "Torque Motor - Gravity Response",
             [
-                f"Initial position: {initial_pos:.4f} rad",
-                f"Final position:   {final_pos:.4f} rad",
+                f"Initial position: {initial_pos:.4f} rad (~{initial_pos * 57.3:.1f}°)",
+                f"Final position:   {final_pos:.4f} rad (~{final_pos * 57.3:.1f}°)",
                 f"Movement:         {movement:.4f} rad ({movement * 57.3:.2f}°)",
                 "",
                 "Expected: Pendulum should fall (no internal PD)",

@@ -28,7 +28,7 @@
 
   <keyframe>
     <key name="home" qpos="0"/>
+    <key name="tilted" qpos="0.5"/>
     <key name="horizontal" qpos="1.57"/>
   </keyframe>
 </mujoco>
-

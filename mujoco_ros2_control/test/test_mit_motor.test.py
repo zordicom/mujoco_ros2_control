@@ -23,7 +23,7 @@ import pytest
 import rclpy
 from ament_index_python.packages import get_package_share_directory
 from controller_manager_msgs.srv import ListHardwareInterfaces
-from mujoco_ros2_control_msgs.srv import SimulationControl
+from mujoco_ros2_control_msgs.srv import ResetToKeyframe, SimulationControl
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64MultiArray
 
@@ -227,6 +227,16 @@ class TestMITMotor(unittest.TestCase):
             request,
         )
 
+    def _reset_to_keyframe(self, keyframe: str):
+        """Reset the MuJoCo simulation to a specific keyframe."""
+        request = ResetToKeyframe.Request()
+        request.keyframe = keyframe
+        return self._call_service(
+            ResetToKeyframe,
+            "/mujoco_system/reset_to_keyframe",
+            request,
+        )
+
     def _pause_simulation(self):
         """Pause the MuJoCo simulation."""
         request = SimulationControl.Request()
@@ -311,15 +321,21 @@ class TestMITMotor(unittest.TestCase):
             "Joint states not received",
         )
 
-        # Reset and pause simulation
-        self._reset_simulation()
+        # Pause simulation first
+        self._pause_simulation()
         self._wait_with_spin(0.5)
 
-        # Get initial position (should be ~0)
+        # Reset to tilted keyframe (qpos=0.5 rad = ~29 degrees)
+        # This puts the pendulum at a non-equilibrium position so gravity will act
+        self._reset_to_keyframe("tilted")
+        self._wait_with_spin(0.5)
+
+        # Get initial position (should be ~1.57 rad)
         rclpy.spin_once(self.node, timeout_sec=0.1)
         initial_position = self.joint_states.position[0]
 
         # Send MIT command with kp=kd=0 (pure torque passthrough, no effort)
+        # With zero gains and zero feedforward, pendulum should fall freely
         self._send_mit_command(pos=0.0, vel=0.0, effort=0.0, kp=0.0, kd=0.0)
         self._wait_with_spin(0.2)
 
@@ -335,9 +351,9 @@ class TestMITMotor(unittest.TestCase):
         print_result_box(
             "MIT Motor - Torque Passthrough (kp=kd=0)",
             [
-                f"Initial position: {initial_position:.4f} rad",
-                f"Final position:   {final_position:.4f} rad",
-                f"Position change:  {position_change:.4f} rad",
+                f"Initial position: {initial_position:.4f} rad (~{initial_position * 57.3:.1f}°)",
+                f"Final position:   {final_position:.4f} rad (~{final_position * 57.3:.1f}°)",
+                f"Position change:  {position_change:.4f} rad (~{position_change * 57.3:.1f}°)",
                 "",
                 "Expected: Pendulum falls under gravity (>0.1 rad change)",
                 f"Status: {'PASS' if position_change > 0.1 else 'FAIL'}",
@@ -359,16 +375,25 @@ class TestMITMotor(unittest.TestCase):
             "Joint states not received",
         )
 
-        # Reset and pause simulation
-        self._reset_simulation()
+        # Pause simulation first
+        self._pause_simulation()
         self._wait_with_spin(0.5)
 
-        # Get initial position (should be ~0)
+        # Reset to tilted keyframe (0.5 rad = ~29 degrees)
+        # This is a non-equilibrium position - gravity wants to pull it down
+        self._reset_to_keyframe("tilted")
+        self._wait_with_spin(0.5)
+
+        # Get initial position (should be ~0.5 rad)
         rclpy.spin_once(self.node, timeout_sec=0.1)
         initial_position = self.joint_states.position[0]
+        target_position = 0.5  # Hold at tilted position
 
-        # Send MIT command with kp=100, kd=10 (impedance control at position 0)
-        self._send_mit_command(pos=0.0, vel=0.0, effort=0.0, kp=100.0, kd=10.0)
+        # Send MIT command with kp=100, kd=10 (impedance control at tilted position)
+        # This should hold the pendulum against gravity
+        self._send_mit_command(
+            pos=target_position, vel=0.0, effort=0.0, kp=100.0, kd=10.0
+        )
         self._wait_with_spin(0.2)
 
         # Unpause simulation - pendulum should be held by impedance control
@@ -378,17 +403,17 @@ class TestMITMotor(unittest.TestCase):
         # Get final position
         rclpy.spin_once(self.node, timeout_sec=0.1)
         final_position = self.joint_states.position[0]
-        position_error = abs(final_position - initial_position)
+        position_error = abs(final_position - target_position)
 
         print_result_box(
             "MIT Motor - Impedance Control (kp=100, kd=10)",
             [
-                "Target position:  0.0000 rad",
-                f"Initial position: {initial_position:.4f} rad",
-                f"Final position:   {final_position:.4f} rad",
-                f"Position error:   {position_error:.4f} rad",
+                f"Target position:  {target_position:.4f} rad (~{target_position * 57.3:.1f}°)",
+                f"Initial position: {initial_position:.4f} rad (~{initial_position * 57.3:.1f}°)",
+                f"Final position:   {final_position:.4f} rad (~{final_position * 57.3:.1f}°)",
+                f"Position error:   {position_error:.4f} rad (~{position_error * 57.3:.1f}°)",
                 "",
-                "Expected: Pendulum holds position (<0.1 rad error)",
+                "Expected: Pendulum holds position against gravity (<0.1 rad error)",
                 f"Status: {'PASS' if position_error < 0.1 else 'FAIL'}",
             ],
         )
