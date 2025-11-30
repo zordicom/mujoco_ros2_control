@@ -344,11 +344,14 @@ hardware_interface::return_type MujocoSystem::read(
     joint_state.position = mj_data_->qpos[joint_state.mj_pos_adr];
     joint_state.velocity = mj_data_->qvel[joint_state.mj_vel_adr];
 
-    // Effort: Read from qfrc_actuator (actual generalized force from actuators)
-    // This represents what a real torque sensor would measure, or what current-based
-    // torque estimation (τ = Kt × I) would report. It's the actual force applied by
-    // the actuators, not the commanded force.
-    joint_state.effort = mj_data_->qfrc_actuator[joint_state.mj_vel_adr];
+    // Effort: Sum of explicit actuator forces AND implicit solver forces
+    // qfrc_actuator: explicit forces from actuators (e.g., torque actuators, PD error)
+    // qfrc_smooth: implicit forces computed by MuJoCo's implicit integrator
+    // For position-controlled actuators with implicit integration, the force needed to
+    // hold a position against gravity appears in qfrc_smooth, not qfrc_actuator.
+    // This sum represents what a real torque sensor would measure.
+    joint_state.effort = mj_data_->qfrc_actuator[joint_state.mj_vel_adr] +
+                         mj_data_->qfrc_smooth[joint_state.mj_vel_adr];
   }
 
   // IMU Sensor data
