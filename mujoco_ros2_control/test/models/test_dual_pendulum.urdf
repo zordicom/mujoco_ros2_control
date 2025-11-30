@@ -1,0 +1,123 @@
+<?xml version="1.0"?>
+<!-- URDF for Dual Pendulum Test -->
+<!-- Two separate hardware interfaces sharing one MuJoCo simulation -->
+<robot name="dual_pendulum">
+  <link name="world"/>
+
+  <!-- Left Pendulum -->
+  <link name="left_base">
+    <visual>
+      <geometry><box size="0.1 0.1 0.1"/></geometry>
+      <material name="blue"><color rgba="0.3 0.3 0.8 1"/></material>
+    </visual>
+  </link>
+
+  <joint name="left_base_fixed" type="fixed">
+    <parent link="world"/>
+    <child link="left_base"/>
+    <origin xyz="-0.5 0 0.5"/>
+  </joint>
+
+  <link name="left_pendulum">
+    <visual>
+      <geometry><cylinder radius="0.02" length="0.5"/></geometry>
+      <origin xyz="0 0 -0.25"/>
+      <material name="light_blue"><color rgba="0.2 0.4 0.8 1"/></material>
+    </visual>
+    <inertial>
+      <mass value="1.0"/>
+      <inertia ixx="0.02" ixy="0" ixz="0" iyy="0.02" iyz="0" izz="0.001"/>
+    </inertial>
+  </link>
+
+  <joint name="left_joint1" type="revolute">
+    <parent link="left_base"/>
+    <child link="left_pendulum"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-3.14" upper="3.14" effort="50" velocity="10"/>
+  </joint>
+
+  <!-- Right Pendulum -->
+  <link name="right_base">
+    <visual>
+      <geometry><box size="0.1 0.1 0.1"/></geometry>
+      <material name="red"><color rgba="0.8 0.3 0.3 1"/></material>
+    </visual>
+  </link>
+
+  <joint name="right_base_fixed" type="fixed">
+    <parent link="world"/>
+    <child link="right_base"/>
+    <origin xyz="0.5 0 0.5"/>
+  </joint>
+
+  <link name="right_pendulum">
+    <visual>
+      <geometry><cylinder radius="0.02" length="0.5"/></geometry>
+      <origin xyz="0 0 -0.25"/>
+      <material name="light_red"><color rgba="0.8 0.2 0.2 1"/></material>
+    </visual>
+    <inertial>
+      <mass value="1.0"/>
+      <inertia ixx="0.02" ixy="0" ixz="0" iyy="0.02" iyz="0" izz="0.001"/>
+    </inertial>
+  </link>
+
+  <joint name="right_joint1" type="revolute">
+    <parent link="right_base"/>
+    <child link="right_pendulum"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-3.14" upper="3.14" effort="50" velocity="10"/>
+  </joint>
+
+  <!-- ============================================================ -->
+  <!-- LEFT HARDWARE INTERFACE (PRIMARY - owns simulation) -->
+  <!-- ============================================================ -->
+  <ros2_control name="left_pendulum_interface" type="system">
+    <hardware>
+      <plugin>mujoco_ros2_control/MujocoSystem</plugin>
+      <param name="mujoco_model">test/models/test_dual_pendulum.xml</param>
+      <param name="mujoco_model_package">mujoco_ros2_control</param>
+      <param name="mujoco_viewer">false</param>
+    </hardware>
+
+    <joint name="left_joint1">
+      <command_interface name="position"/>
+      <command_interface name="velocity"/>
+      <command_interface name="effort"/>
+      <command_interface name="kp"/>
+      <command_interface name="kd"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+      <param name="max_kp">500</param>
+      <param name="max_kd">50</param>
+    </joint>
+  </ros2_control>
+
+  <!-- ============================================================ -->
+  <!-- RIGHT HARDWARE INTERFACE (SECONDARY - shares simulation) -->
+  <!-- ============================================================ -->
+  <ros2_control name="right_pendulum_interface" type="system">
+    <hardware>
+      <plugin>mujoco_ros2_control/MujocoSystem</plugin>
+      <param name="mujoco_model">test/models/test_dual_pendulum.xml</param>
+      <param name="mujoco_model_package">mujoco_ros2_control</param>
+      <param name="mujoco_viewer">false</param>
+    </hardware>
+
+    <joint name="right_joint1">
+      <command_interface name="position"/>
+      <command_interface name="velocity"/>
+      <command_interface name="effort"/>
+      <command_interface name="kp"/>
+      <command_interface name="kd"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+      <param name="max_kp">500</param>
+      <param name="max_kd">50</param>
+    </joint>
+  </ros2_control>
+</robot>
+

@@ -1,0 +1,112 @@
+# Controller configuration for dual pendulum test
+# Two separate MIT mode controllers for left and right pendulums
+
+controller_manager:
+  ros__parameters:
+    update_rate: 1000
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    # Left pendulum MIT mode controllers
+    left_position_controller:
+      type: forward_command_controller/ForwardCommandController
+
+    left_velocity_controller:
+      type: forward_command_controller/ForwardCommandController
+
+    left_effort_controller:
+      type: forward_command_controller/ForwardCommandController
+
+    left_kp_controller:
+      type: forward_command_controller/ForwardCommandController
+
+    left_kd_controller:
+      type: forward_command_controller/ForwardCommandController
+
+    # Right pendulum MIT mode controllers
+    right_position_controller:
+      type: forward_command_controller/ForwardCommandController
+
+    right_velocity_controller:
+      type: forward_command_controller/ForwardCommandController
+
+    right_effort_controller:
+      type: forward_command_controller/ForwardCommandController
+
+    right_kp_controller:
+      type: forward_command_controller/ForwardCommandController
+
+    right_kd_controller:
+      type: forward_command_controller/ForwardCommandController
+
+joint_state_broadcaster:
+  ros__parameters:
+    use_local_topics: false
+
+# ============================================================
+# LEFT PENDULUM CONTROLLERS
+# ============================================================
+left_position_controller:
+  ros__parameters:
+    joints:
+      - left_joint1
+    interface_name: position
+
+left_velocity_controller:
+  ros__parameters:
+    joints:
+      - left_joint1
+    interface_name: velocity
+
+left_effort_controller:
+  ros__parameters:
+    joints:
+      - left_joint1
+    interface_name: effort
+
+left_kp_controller:
+  ros__parameters:
+    joints:
+      - left_joint1
+    interface_name: kp
+
+left_kd_controller:
+  ros__parameters:
+    joints:
+      - left_joint1
+    interface_name: kd
+
+# ============================================================
+# RIGHT PENDULUM CONTROLLERS
+# ============================================================
+right_position_controller:
+  ros__parameters:
+    joints:
+      - right_joint1
+    interface_name: position
+
+right_velocity_controller:
+  ros__parameters:
+    joints:
+      - right_joint1
+    interface_name: velocity
+
+right_effort_controller:
+  ros__parameters:
+    joints:
+      - right_joint1
+    interface_name: effort
+
+right_kp_controller:
+  ros__parameters:
+    joints:
+      - right_joint1
+    interface_name: kp
+
+right_kd_controller:
+  ros__parameters:
+    joints:
+      - right_joint1
+    interface_name: kd
+

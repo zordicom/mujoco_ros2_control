@@ -136,6 +136,7 @@ if(BUILD_TESTING)
   add_launch_test(test/test_position_velocity.test.py)
   add_launch_test(test/test_torque_motor.test.py)
   add_launch_test(test/test_mit_motor.test.py)
+  add_launch_test(test/test_dual_pendulum.test.py)
 endif()
 
 ament_package()

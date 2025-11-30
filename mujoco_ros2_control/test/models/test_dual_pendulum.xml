@@ -1,0 +1,53 @@
+<!-- MuJoCo model for Dual Pendulum Test (like bimanual robot) -->
+<!-- Two independent pendulums controlled by separate hardware interfaces -->
+<mujoco model="dual_pendulum">
+  <compiler angle="radian"/>
+
+  <option gravity="0 0 -9.81" timestep="0.001"/>
+
+  <worldbody>
+    <light diffuse=".5 .5 .5" pos="0 0 3" dir="0 0 -1"/>
+    <geom name="floor" type="plane" size="2 2 0.1" rgba="0.9 0.9 0.9 1"/>
+
+    <!-- Left Pendulum (at x=-0.5) -->
+    <body name="left_base" pos="-0.5 0 0.5">
+      <geom type="box" size="0.05 0.05 0.05" rgba="0.3 0.3 0.8 1"/>
+
+      <body name="left_pendulum" pos="0 0 0">
+        <joint name="left_joint1" type="hinge" axis="0 1 0" range="-3.14 3.14" damping="0.1"/>
+        <geom type="capsule" fromto="0 0 0 0 0 -0.5" size="0.02" rgba="0.2 0.4 0.8 1" mass="1.0"/>
+      </body>
+    </body>
+
+    <!-- Right Pendulum (at x=+0.5) -->
+    <body name="right_base" pos="0.5 0 0.5">
+      <geom type="box" size="0.05 0.05 0.05" rgba="0.8 0.3 0.3 1"/>
+
+      <body name="right_pendulum" pos="0 0 0">
+        <joint name="right_joint1" type="hinge" axis="0 1 0" range="-3.14 3.14" damping="0.1"/>
+        <geom type="capsule" fromto="0 0 0 0 0 -0.5" size="0.02" rgba="0.8 0.2 0.2 1" mass="1.0"/>
+      </body>
+    </body>
+  </worldbody>
+
+  <!-- MIT mode actuators for both pendulums -->
+  <actuator>
+    <!-- Left pendulum actuators -->
+    <position name="act_pos_left_joint1" joint="left_joint1" kp="100" kv="0" ctrlrange="-3.14 3.14"/>
+    <velocity name="act_vel_left_joint1" joint="left_joint1" kv="10" ctrlrange="-10 10"/>
+    <motor name="act_tau_left_joint1" joint="left_joint1" gear="1" ctrlrange="-50 50"/>
+
+    <!-- Right pendulum actuators -->
+    <position name="act_pos_right_joint1" joint="right_joint1" kp="100" kv="0" ctrlrange="-3.14 3.14"/>
+    <velocity name="act_vel_right_joint1" joint="right_joint1" kv="10" ctrlrange="-10 10"/>
+    <motor name="act_tau_right_joint1" joint="right_joint1" gear="1" ctrlrange="-50 50"/>
+  </actuator>
+
+  <keyframe>
+    <key name="home" qpos="0 0"/>
+    <key name="tilted" qpos="0.5 0.5"/>
+    <key name="asymmetric" qpos="0.3 -0.3"/>
+    <key name="horizontal" qpos="1.57 1.57"/>
+  </keyframe>
+</mujoco>
+
