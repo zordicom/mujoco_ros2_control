@@ -7,8 +7,9 @@
 This document describes the complete architecture of `mujoco_ros2_control`, a ROS 2 Control hardware interface for MuJoCo simulation. The package provides:
 
 - **Drop-in replacement** for `picknik_mujoco_ros/MujocoSystem` in MoveIt Pro
+- **Shared simulation singleton** for bimanual/multi-arm robots
 - **Actuator-centric control** with per-joint, per-actuator command routing
-- **Full MIT mode support** with position/velocity/effort interfaces
+- **Full MIT mode support** with dynamic kp/kd gains
 - **Runtime simulation control** (pause/unpause/reset services)
 - **Integrated interactive viewer** (optional, via URDF parameter)
 - **Camera publishing** (RGB + depth images)
@@ -43,9 +44,53 @@ ros2 launch mujoco_ros2_control_demos test_2dof_gravity.launch.py
 
 ## Architecture
 
+### Shared Simulation (Singleton Pattern)
+
+To support complex systems like bimanual robots where multiple `hardware_interface` instances (e.g., left arm, right arm) need to interact within the **same** physics world, `mujoco_ros2_control` uses a Singleton pattern for the MuJoCo model and data.
+
+#### Mechanism
+
+- **Shared State:** `mjModel*`, `mjData*`, and the ROS node are static members shared across all instances of `MujocoSystem`.
+- **Primary/Secondary Logic:**
+  - The **first** initialized interface becomes the **PRIMARY** instance.
+  - Subsequent interfaces become **SECONDARY** instances.
+  - Only the **PRIMARY** instance is responsible for:
+    - Loading the XML model.
+    - Creating the ROS node (`mujoco_system`).
+    - Creating global services (`~/simulation_control`, `~/reset_to_keyframe`, `~/apply_external_wrench`).
+    - Stepping the simulation (`mj_step1`, `mj_step2`).
+    - Publishing `/clock` and `~/qfrc_bias`.
+    - Managing the interactive viewer.
+
+#### Static Members
+
+```cpp
+static std::mutex static_mutex_;
+static mjModel* shared_model_;
+static mjData* shared_data_;
+static int instance_count_;
+static rclcpp::Node::SharedPtr shared_node_;
+static std::string shared_model_path_;
+```
+
+#### Lifecycle
+
+| Phase | Primary Instance | Secondary Instance |
+|-------|-----------------|-------------------|
+| `on_init()` | Loads model, creates `mjData`, creates ROS node | Reuses shared model/data/node |
+| `on_configure()` | Creates services, publishers, starts viewer | No-op for services/viewer |
+| `read()` | Steps simulation, publishes clock | Only reads joint states |
+| `write()` | Writes to `mj_data_->ctrl` | Writes to `mj_data_->ctrl` |
+| Destructor | Frees model/data when last instance | Clears local pointers only |
+
+#### Model Path Validation
+
+- All instances MUST specify the same `mujoco_model` file.
+- If a secondary instance requests a different model path, initialization **fails** with an error.
+
 ### Unified Lifecycle Plugin
 
-The `MujocoSystem` plugin is always lifecycle-managed and always owns the MuJoCo model:
+The `MujocoSystem` plugin is always lifecycle-managed:
 
 ```
 controller_manager
@@ -53,8 +98,8 @@ controller_manager
         ├─> on_init(): Parse URDF parameters, load MuJoCo model, register joints
         ├─> on_configure(): Create services, publishers, optional viewer
         ├─> on_activate(): Reset simulation, set PAUSED state
-        ├─> read(): Copy joint states FROM mj_data
-        └─> write(): Copy commands TO mj_data->ctrl + mj_step() + publish clock
+        ├─> read(): Copy joint states FROM mj_data (PRIMARY steps simulation)
+        └─> write(): Copy commands TO mj_data->ctrl
 ```
 
 ### Actuator-Centric Control
@@ -78,6 +123,54 @@ Each joint can have up to three independent actuators in the MuJoCo model:
 | Effort + pos/vel + kp + kd | MIT Mode | τ = Kp*(q_cmd - q) + Kd*(qd_cmd - qd) + τ_ff |
 
 **Note:** MIT mode (effort + position/velocity) requires kp/kd interfaces. Pure effort-only mode is allowed for Dynamixel Current Mode simulation.
+
+---
+
+## Control Loop Timing
+
+### Why Step in `read()`?
+
+In ros2_control, the control loop is:
+
+1. `read()` for ALL hardware interfaces
+2. `update()` for ALL controllers
+3. `write()` for ALL hardware interfaces
+
+By stepping the simulation in the PRIMARY's `read()`:
+
+- Commands from ALL interfaces (written in the previous cycle) are applied **before** the step.
+- All interfaces read **consistent** post-step state.
+
+This introduces a 1-cycle latency for secondary interfaces, which is standard for distributed hardware.
+
+---
+
+## MIT Control Mode Support
+
+Full support for MIT-style control (Position + Velocity + Feedforward Torque + Kp + Kd).
+
+### Control Law
+
+```
+τ = τ_ff + kp * (q_cmd - q) + kd * (qd_cmd - qd)
+```
+
+Where:
+
+- `τ_ff` = feedforward torque (effort command)
+- `kp`, `kd` = dynamic gains from controller (via kp/kd command interfaces)
+- `q_cmd`, `qd_cmd` = position/velocity setpoints
+
+### Interface Requirements
+
+Controllers MUST claim all 5 interfaces for MIT mode:
+
+- `position`, `velocity`, `effort`, `kp`, `kd`
+
+### Safety
+
+- **Hard Error:** If a controller claims `effort` + (`position` OR `velocity`) but NOT `kp`/`kd`, `perform_command_mode_switch()` logs a warning.
+- **Gain Clamping:** `kp` and `kd` are clamped to `max_kp`/`max_kd` (configurable via URDF parameters).
 
 ---
 
@@ -105,9 +198,11 @@ Enable in URDF hardware parameters:
 **Viewer features:**
 
 - Standard MuJoCo interactive viewer with mouse camera controls
-- Runs in background thread at 60 Hz
+- Runs in background thread at 60 Hz (PRIMARY instance only)
 - No impact on simulation when disabled (default)
 - Close window to stop viewer
+
+**For bimanual setups:** Enable viewer only on ONE hardware interface (e.g., left arm). The right arm should have `mujoco_viewer` set to `false` (GLFW limitation).
 
 ---
 
@@ -134,6 +229,58 @@ Enable in URDF hardware parameters:
 </ros2_control>
 ```
 
+### Bimanual Robot Configuration
+
+Define two `<ros2_control>` tags in your URDF (one per arm). Both MUST point to the **same** `mujoco_model` XML file.
+
+```xml
+<!-- Left Arm (PRIMARY, with viewer) -->
+<ros2_control name="left_arm" type="system">
+  <hardware>
+    <plugin>mujoco_ros2_control/MujocoSystem</plugin>
+    <param name="mujoco_model">robot_bimanual.xml</param>
+    <param name="mujoco_model_package">my_robot_description</param>
+    <param name="mujoco_viewer">true</param>
+  </hardware>
+  <joint name="left_joint1">
+    <command_interface name="position"/>
+    <command_interface name="velocity"/>
+    <command_interface name="effort"/>
+    <command_interface name="kp"/>
+    <command_interface name="kd"/>
+    <state_interface name="position"/>
+    <state_interface name="velocity"/>
+    <state_interface name="effort"/>
+    <param name="max_kp">500</param>
+    <param name="max_kd">50</param>
+  </joint>
+  <!-- more joints... -->
+</ros2_control>
+
+<!-- Right Arm (SECONDARY, headless) -->
+<ros2_control name="right_arm" type="system">
+  <hardware>
+    <plugin>mujoco_ros2_control/MujocoSystem</plugin>
+    <param name="mujoco_model">robot_bimanual.xml</param>
+    <param name="mujoco_model_package">my_robot_description</param>
+    <param name="mujoco_viewer">false</param>
+  </hardware>
+  <joint name="right_joint1">
+    <command_interface name="position"/>
+    <command_interface name="velocity"/>
+    <command_interface name="effort"/>
+    <command_interface name="kp"/>
+    <command_interface name="kd"/>
+    <state_interface name="position"/>
+    <state_interface name="velocity"/>
+    <state_interface name="effort"/>
+    <param name="max_kp">500</param>
+    <param name="max_kd">50</param>
+  </joint>
+  <!-- more joints... -->
+</ros2_control>
+```
+
 ### Optional Parameters
 
 | Parameter | Type | Default | Description |
@@ -143,6 +290,13 @@ Enable in URDF hardware parameters:
 | `mujoco_viewer` | bool | false | Enable interactive MuJoCo viewer |
 | `enable_cameras` | bool | false | Enable camera image publishing |
 | `camera_publish_rate` | double | 6.0 | Camera update rate (Hz) |
+
+### Joint Parameters (for MIT mode)
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `max_kp` | double | 1000.0 | Maximum allowed kp gain |
+| `max_kd` | double | 100.0 | Maximum allowed kd gain |
 
 ---
 
@@ -197,7 +351,13 @@ Define keyframes in MuJoCo XML for initial configurations:
 
 ## ROS Services
 
-All services are available at `/mujoco_system/` namespace.
+All services are available at `/mujoco_system/` namespace (PRIMARY instance only).
+
+| Service | Description |
+|---------|-------------|
+| `~/simulation_control` | Pause/unpause/reset/status |
+| `~/reset_to_keyframe` | Reset to named or indexed keyframe |
+| `~/apply_external_wrench` | Apply force/torque to a body |
 
 ### Reset to Keyframe
 
@@ -261,7 +421,7 @@ ros2 service call /mujoco_system/apply_external_wrench \
 
 ### Simulation Stepping
 
-The plugin steps simulation in the `write()` method:
+The PRIMARY instance steps simulation in the `read()` method:
 
 ```cpp
 mj_step1(mj_model_, mj_data_);  // First half-step (kinematics, collision)
@@ -272,20 +432,20 @@ publish_clock();                 // Publish /clock
 
 ### Control Flow
 
-1. **read()**: Copy joint states from `mj_data->qpos`, `qvel`, `qfrc_actuator`
-2. **Controller update**: ros2_control updates controllers
-3. **write()**:
+1. **read()** (PRIMARY): Step simulation, copy joint states from `mj_data->qpos`, `qvel`, `qfrc_actuator`
+2. **read()** (SECONDARY): Copy joint states only (no stepping)
+3. **Controller update**: ros2_control updates controllers
+4. **write()** (ALL):
    - Check for pending resets
    - Handle pause state
    - Apply commands to actuators via `mj_data->ctrl`
-   - Step simulation
-   - Apply external wrenches
-   - Publish clock and diagnostics
+   - Apply external wrenches (PRIMARY only)
 
 ### Thread Safety
 
 All shared state is protected by mutexes:
 
+- `static_mutex_` - Shared model/data initialization
 - `sim_state_mutex_` - Pause/unpause state
 - `wrench_mutex_` - External wrench data
 - `reset_mutex_` - Pending keyframe reset
@@ -300,6 +460,14 @@ When PAUSED:
 - Simulation time frozen
 - Controllers remain active with `period=0`
 - State interfaces unchanged
+
+---
+
+## Known Limitations
+
+1. **Single Model Only:** All `MujocoSystem` instances must use the same XML model file. Loading different models is not supported.
+2. **GLFW Single-Init:** Only one viewer can exist per process (GLFW constraint).
+3. **1-Cycle Latency:** Secondary interfaces have a 1-cycle delay between command and state update.
 
 ---
 
@@ -397,6 +565,7 @@ Controllers are loaded automatically via spawner. Simulation starts PAUSED.
 | Feature | MujocoSystem Plugin |
 |---------|---------------------|
 | MoveIt Pro integration | ✅ |
+| Shared simulation (bimanual) | ✅ |
 | Simulation stepping | ✅ |
 | Services (reset/pause/wrench) | ✅ |
 | Clock publishing | ✅ |
@@ -410,6 +579,25 @@ Controllers are loaded automatically via spawner. Simulation starts PAUSED.
 ---
 
 ## Changelog
+
+### 2025-11-30: Shared Simulation Singleton + MIT Mode Fixes
+
+**Major Changes:**
+
+- Implemented singleton pattern for shared `mjModel`/`mjData` across multiple hardware interfaces
+- PRIMARY instance handles simulation stepping, services, viewer
+- SECONDARY instances read/write to shared state
+- Fixed MIT mode to compute PD in software with dynamic `kp`/`kd` gains
+- Added dual pendulum test for bimanual-like control validation
+- All 6 actuator type tests passing
+
+**Files Changed:**
+
+- `mujoco_system.hpp` - Added static members for shared state
+- `mujoco_system.cpp` - Implemented PRIMARY/SECONDARY logic, fixed MIT mode
+- `test/test_dual_pendulum.test.py` - New test for shared simulation
+- `test/models/test_dual_pendulum.xml` - New dual pendulum MuJoCo model
+- `doc/status.md` - Architecture documentation (merged into this file)
 
 ### 2025-11-28: Support Both MIT Mode and Pure Torque Mode
 

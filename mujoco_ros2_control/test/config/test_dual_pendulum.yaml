@@ -109,4 +109,3 @@ right_kd_controller:
     joints:
       - right_joint1
     interface_name: kd
-
