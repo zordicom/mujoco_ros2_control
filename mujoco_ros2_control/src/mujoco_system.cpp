@@ -20,6 +20,7 @@
 
 #include "mujoco_ros2_control/mujoco_system.hpp"
 
+#include <algorithm>
 #include <iostream>
 #include <iomanip>
 #include <fstream>
@@ -128,8 +129,14 @@ CallbackReturn MujocoSystem::on_init(const hardware_interface::HardwareInfo& inf
 
   // Viewer configuration
   auto viewer_it = info_.hardware_parameters.find("mujoco_viewer");
-  if (viewer_it != info_.hardware_parameters.end() && viewer_it->second == "true") {
-    mujoco_viewer_ = true;
+  if (viewer_it != info_.hardware_parameters.end()) {
+    // Handle case-insensitive comparison (xacro may output "True" or "true")
+    std::string value = viewer_it->second;
+    std::transform(value.begin(), value.end(), value.begin(), ::tolower);
+    if (value == "true") {
+      mujoco_viewer_ = true;
+      RCLCPP_INFO(logger_, "Interactive viewer will be enabled in on_configure()");
+    }
   }
 
   // ---------------------------------------------------------
