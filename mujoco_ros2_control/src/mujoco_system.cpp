@@ -117,14 +117,22 @@ CallbackReturn MujocoSystem::on_init(const hardware_interface::HardwareInfo& inf
 
   // Camera configuration
   auto cam_it = info_.hardware_parameters.find("enable_cameras");
-  if (cam_it != info_.hardware_parameters.end() && cam_it->second == "true") {
-    enable_cameras_ = true;
+  if (cam_it != info_.hardware_parameters.end()) {
+    RCLCPP_INFO(logger_, "enable_cameras parameter found: '%s'", cam_it->second.c_str());
+    // Handle both "true" and "True" (xacro uses Python-style capitalization)
+    if (cam_it->second == "true" || cam_it->second == "True") {
+      enable_cameras_ = true;
 
-    auto rate_it = info_.hardware_parameters.find("camera_publish_rate");
-    if (rate_it != info_.hardware_parameters.end()) {
-      camera_publish_rate_ = std::stod(rate_it->second);
+      auto rate_it = info_.hardware_parameters.find("camera_publish_rate");
+      if (rate_it != info_.hardware_parameters.end()) {
+        camera_publish_rate_ = std::stod(rate_it->second);
+      }
+      RCLCPP_INFO(logger_, "Cameras ENABLED (%.1f Hz)", camera_publish_rate_);
+    } else {
+      RCLCPP_INFO(logger_, "Cameras DISABLED (enable_cameras='%s')", cam_it->second.c_str());
     }
-    RCLCPP_INFO(logger_, "Cameras enabled (%.1f Hz)", camera_publish_rate_);
+  } else {
+    RCLCPP_WARN(logger_, "enable_cameras parameter NOT FOUND - cameras disabled by default");
   }
 
   // Viewer configuration
@@ -260,58 +268,95 @@ CallbackReturn MujocoSystem::on_configure(const rclcpp_lifecycle::State& /* prev
   // Create services and publishers (primary only)
   create_services_and_publishers();
 
-  // Initialize cameras if enabled (primary only - cameras belong to scene)
-  if (is_primary_ && enable_cameras_) {
-    cameras_ = std::make_unique<MujocoCameras>(node_);
-    cameras_->init(mj_model_);
+  // =========================================================================
+  // OpenGL Context Strategy:
+  // All OpenGL rendering (viewer + cameras) must use the SAME context on ONE thread.
+  // - If viewer enabled: viewer thread owns the context, cameras render there too
+  // - If no viewer: main thread uses a hidden window for offscreen camera rendering
+  // =========================================================================
 
-    double physics_rate = 1.0 / mj_model_->opt.timestep;
-    camera_interval_ = static_cast<int>(std::round(physics_rate / camera_publish_rate_));
-
-    RCLCPP_INFO(logger_, "Cameras initialized: publishing every %d steps", camera_interval_);
-  }
-
-  // Initialize viewer if enabled (primary only - one viewer for the scene)
   if (is_primary_ && mujoco_viewer_) {
-    RCLCPP_INFO(logger_, "Starting interactive viewer thread...");
-
-    // Start viewer thread - do ALL GLFW/OpenGL init inside thread for proper context handling
+    // Viewer mode: viewer thread handles both viewer AND camera rendering
     stop_viewer_ = false;
     viewer_thread_ = std::thread([this]() {
-      // Initialize GLFW in viewer thread (required for proper OpenGL context)
+      // Initialize GLFW in viewer thread (owns the OpenGL context)
       if (!glfwInit()) {
-        RCLCPP_ERROR(logger_, "Failed to initialize GLFW in viewer thread");
+        RCLCPP_ERROR(logger_, "Failed to initialize GLFW for viewer");
         return;
       }
 
-      // Create window and initialize rendering (all on same thread as rendering)
+      // Create window and initialize rendering
       rendering_ = mujoco_ros2_control::MujocoRendering::get_instance();
       rendering_->init(mj_model_, mj_data_);
 
-      RCLCPP_INFO(logger_, "Viewer thread started - rendering at 60 Hz");
-      RCLCPP_INFO(logger_, "  Mouse: Camera controls | Close window to stop");
+      // Initialize cameras on THIS thread if enabled (shares OpenGL context with viewer)
+      if (enable_cameras_) {
+        cameras_ = std::make_unique<MujocoCameras>(node_);
+        cameras_->init(mj_model_);
 
-      // Rendering loop
-      while (!stop_viewer_ && !rendering_->is_close_flag_raised()) {
-        rendering_->update();
-        glfwPollEvents();  // Process window events
-        std::this_thread::sleep_for(std::chrono::milliseconds(16)); // ~60 Hz
+        double physics_rate = 1.0 / mj_model_->opt.timestep;
+        camera_interval_ = static_cast<int>(std::round(physics_rate / camera_publish_rate_));
+
+        RCLCPP_INFO(logger_, "Cameras initialized (shared context with viewer): %d steps between frames",
+                    camera_interval_);
       }
 
-      RCLCPP_INFO(logger_, "Viewer thread stopping - cleaning up...");
+      RCLCPP_INFO(logger_, "MuJoCo viewer started%s", enable_cameras_ ? " with cameras" : "");
 
-      // Clean up MuJoCo visualization resources and GLFW
-      // NOTE: rendering_->close() destroys the window and frees MuJoCo scene/context
-      // glfwTerminate() must be called AFTER to fully clean up GLFW
+      // Rendering loop - handles both viewer and cameras
+      while (!stop_viewer_ && !rendering_->is_close_flag_raised()) {
+        rendering_->update();
+
+        // Render cameras on this thread (same OpenGL context)
+        if (cameras_ && camera_render_requested_.load()) {
+          cameras_->update(mj_model_, mj_data_);
+          camera_render_requested_.store(false);
+        }
+
+        glfwPollEvents();
+        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+      }
+
+      RCLCPP_DEBUG(logger_, "Viewer thread stopping...");
+
+      // Clean up cameras first (uses OpenGL context)
+      if (cameras_) {
+        cameras_->close();
+        cameras_.reset();
+      }
+
       if (rendering_) {
         rendering_->close();
       }
       glfwTerminate();
-
-      RCLCPP_INFO(logger_, "Viewer thread stopped");
+      RCLCPP_DEBUG(logger_, "Viewer thread stopped");
     });
+  } else if (is_primary_ && enable_cameras_) {
+    // Headless camera mode: main thread uses hidden window for offscreen rendering
+    if (glfwInit()) {
+      glfw_initialized_ = true;
+      glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+      camera_gl_window_ = glfwCreateWindow(1, 1, "mujoco_camera_ctx", nullptr, nullptr);
+      if (camera_gl_window_) {
+        glfwMakeContextCurrent(camera_gl_window_);
 
-    RCLCPP_INFO(logger_, "MuJoCo interactive viewer enabled (background thread)");
+        cameras_ = std::make_unique<MujocoCameras>(node_);
+        cameras_->init(mj_model_);
+
+        double physics_rate = 1.0 / mj_model_->opt.timestep;
+        camera_interval_ = static_cast<int>(std::round(physics_rate / camera_publish_rate_));
+
+        RCLCPP_INFO(logger_, "Cameras initialized (headless): %d steps between frames", camera_interval_);
+      } else {
+        RCLCPP_WARN(logger_, "Failed to create offscreen window - cameras disabled");
+        enable_cameras_ = false;
+        glfwTerminate();
+        glfw_initialized_ = false;
+      }
+    } else {
+      RCLCPP_WARN(logger_, "Failed to initialize GLFW - cameras disabled (no display?)");
+      enable_cameras_ = false;
+    }
   }
 
   RCLCPP_INFO(logger_, "MujocoSystem configured successfully");
@@ -358,7 +403,26 @@ CallbackReturn MujocoSystem::on_cleanup(const rclcpp_lifecycle::State& /* prev *
   if (is_primary_ && viewer_thread_.joinable()) {
     stop_viewer_ = true;
     viewer_thread_.join();
-    RCLCPP_INFO(logger_, "Viewer thread stopped");
+    RCLCPP_DEBUG(logger_, "Viewer thread stopped");
+  }
+
+  // Clean up cameras
+  if (cameras_) {
+    cameras_->close();
+    cameras_.reset();
+  }
+
+  // Clean up camera OpenGL window
+  if (camera_gl_window_) {
+    glfwDestroyWindow(camera_gl_window_);
+    camera_gl_window_ = nullptr;
+  }
+
+  // Terminate GLFW if we initialized it (after viewer and cameras are done)
+  if (glfw_initialized_) {
+    glfwTerminate();
+    glfw_initialized_ = false;
+    RCLCPP_DEBUG(logger_, "GLFW terminated");
   }
 
   // Stop executor thread (PRIMARY only owns the executor)
@@ -493,11 +557,15 @@ hardware_interface::return_type MujocoSystem::read(
     }
     qfrc_bias_publisher_->publish(qfrc_msg);
 
-    // Update cameras
-    if (cameras_) {
-      if (++camera_counter_ >= camera_interval_) {
+    // Update cameras at specified interval
+    if (cameras_ && ++camera_counter_ >= camera_interval_) {
+      camera_counter_ = 0;
+      if (mujoco_viewer_) {
+        // Viewer mode: signal viewer thread to render cameras (same GL context)
+        camera_render_requested_.store(true);
+      } else {
+        // Headless mode: render directly on main thread
         cameras_->update(mj_model_, mj_data_);
-        camera_counter_ = 0;
       }
     }
   } // End if (is_primary_)
@@ -742,27 +810,22 @@ hardware_interface::return_type MujocoSystem::perform_command_mode_switch(
         if (interface_type == hardware_interface::HW_IF_POSITION)
         {
           joint_state.position_command_active = false;
-          RCLCPP_INFO(logger_, "Stopped position interface for joint '%s'", joint_name.c_str());
         }
         else if (interface_type == hardware_interface::HW_IF_VELOCITY)
         {
           joint_state.velocity_command_active = false;
-          RCLCPP_INFO(logger_, "Stopped velocity interface for joint '%s'", joint_name.c_str());
         }
         else if (interface_type == hardware_interface::HW_IF_EFFORT)
         {
           joint_state.effort_command_active = false;
-          RCLCPP_INFO(logger_, "Stopped effort interface for joint '%s'", joint_name.c_str());
         }
         else if (interface_type == "kp")
         {
           joint_state.kp_command_active = false;
-          RCLCPP_INFO(logger_, "Stopped kp interface for joint '%s'", joint_name.c_str());
         }
         else if (interface_type == "kd")
         {
           joint_state.kd_command_active = false;
-          RCLCPP_INFO(logger_, "Stopped kd interface for joint '%s'", joint_name.c_str());
         }
         break;
       }
@@ -784,34 +847,33 @@ hardware_interface::return_type MujocoSystem::perform_command_mode_switch(
         if (interface_type == hardware_interface::HW_IF_POSITION)
         {
           joint_state.position_command_active = true;
-          RCLCPP_INFO(logger_, "Started position interface for joint '%s'", joint_name.c_str());
         }
         else if (interface_type == hardware_interface::HW_IF_VELOCITY)
         {
           joint_state.velocity_command_active = true;
-          RCLCPP_INFO(logger_, "Started velocity interface for joint '%s'", joint_name.c_str());
         }
         else if (interface_type == hardware_interface::HW_IF_EFFORT)
         {
           joint_state.effort_command_active = true;
-          RCLCPP_INFO(logger_, "Started effort interface for joint '%s'", joint_name.c_str());
         }
         else if (interface_type == "kp")
         {
           joint_state.kp_command_active = true;
-          RCLCPP_INFO(logger_, "Started kp interface for joint '%s'", joint_name.c_str());
         }
         else if (interface_type == "kd")
         {
           joint_state.kd_command_active = true;
-          RCLCPP_INFO(logger_, "Started kd interface for joint '%s'", joint_name.c_str());
         }
         break;
       }
     }
   }
 
-  // Log the control mode for each joint based on claimed interfaces
+  // Log summary of mode switch (not per-joint details)
+  RCLCPP_INFO(logger_, "Command mode switch: started %zu interfaces, stopped %zu interfaces",
+              start_interfaces.size(), stop_interfaces.size());
+
+  // Log the control mode for each joint at DEBUG level
   for (const auto &joint_state : joint_states_)
   {
     // MIT mode detection: effort + (position OR velocity) + kp + kd
@@ -847,7 +909,7 @@ hardware_interface::return_type MujocoSystem::perform_command_mode_switch(
       mode = "Mixed/custom";
     }
 
-    RCLCPP_INFO(logger_, "Joint '%s' control mode: %s", joint_state.name.c_str(), mode.c_str());
+    RCLCPP_DEBUG(logger_, "Joint '%s' control mode: %s", joint_state.name.c_str(), mode.c_str());
   }
 
   return hardware_interface::return_type::OK;
@@ -888,8 +950,8 @@ void MujocoSystem::register_joints(
     joint_state.mj_vel_actuator_id = mj_name2id(mj_model_, mjOBJ_ACTUATOR, vel_actuator_name.c_str());
     joint_state.mj_tau_actuator_id = mj_name2id(mj_model_, mjOBJ_ACTUATOR, tau_actuator_name.c_str());
 
-    // Log actuator mapping
-    RCLCPP_INFO(logger_, "Joint '%s' actuators: pos=%d, vel=%d, tau=%d",
+    // Log actuator mapping (DEBUG level - per-joint details)
+    RCLCPP_DEBUG(logger_, "Joint '%s' actuators: pos=%d, vel=%d, tau=%d",
                 joint.name.c_str(),
                 joint_state.mj_pos_actuator_id,
                 joint_state.mj_vel_actuator_id,
@@ -907,7 +969,7 @@ void MujocoSystem::register_joints(
         const double bias1 = mj_model_->actuator_biasprm[act_id * 10 + 1];
         const double bias2 = mj_model_->actuator_biasprm[act_id * 10 + 2];
 
-        RCLCPP_INFO(logger_,
+        RCLCPP_DEBUG(logger_,
           "  %s: dyn=%d, gain_t=%d, bias_t=%d, gain=[%.2f,%.2f], bias=[%.2f,%.2f,%.2f]",
           name.c_str(), dyn_type, gain_type, bias_type, gain0, gain1, bias0, bias1, bias2);
       }
@@ -1140,7 +1202,7 @@ void MujocoSystem::register_joints(
         if (max_it != joint.parameters.end()) {
           last_joint_state.max_kp = std::stod(max_it->second);
         }
-        RCLCPP_INFO(logger_, "Joint '%s': kp interface registered (max_kp=%.1f)",
+        RCLCPP_DEBUG(logger_, "Joint '%s': kp interface registered (max_kp=%.1f)",
           joint.name.c_str(), last_joint_state.max_kp);
       }
       else if (command_if.name == "kd")
@@ -1153,7 +1215,7 @@ void MujocoSystem::register_joints(
         if (max_it != joint.parameters.end()) {
           last_joint_state.max_kd = std::stod(max_it->second);
         }
-        RCLCPP_INFO(logger_, "Joint '%s': kd interface registered (max_kd=%.1f)",
+        RCLCPP_DEBUG(logger_, "Joint '%s': kd interface registered (max_kd=%.1f)",
           joint.name.c_str(), last_joint_state.max_kd);
       }
     }

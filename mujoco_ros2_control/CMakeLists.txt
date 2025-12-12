@@ -83,10 +83,21 @@ target_include_directories(mujoco_rendering
     ${MUJOCO_INCLUDE_DIR}
     ${EIGEN3_INCLUDE_DIR})
 
-# Build mujoco_system plugin (links with mujoco_rendering for optional viewer)
+# Build mujoco_cameras library first (needed by mujoco_system_plugins)
+add_library(mujoco_cameras SHARED src/mujoco_cameras.cpp)
+ament_target_dependencies(mujoco_cameras ${THIS_PACKAGE_DEPENDS})
+target_link_libraries(mujoco_cameras ${MUJOCO_LIB} glfw)
+target_include_directories(mujoco_cameras
+  PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+    ${MUJOCO_INCLUDE_DIR}
+    ${EIGEN3_INCLUDE_DIR})
+
+# Build mujoco_system plugin (links with mujoco_rendering and mujoco_cameras)
 add_library(mujoco_system_plugins SHARED src/mujoco_system.cpp)
 ament_target_dependencies(mujoco_system_plugins ${THIS_PACKAGE_DEPENDS})
-target_link_libraries(mujoco_system_plugins ${MUJOCO_LIB} mujoco_rendering glfw)
+target_link_libraries(mujoco_system_plugins ${MUJOCO_LIB} mujoco_rendering mujoco_cameras glfw)
 target_include_directories(mujoco_system_plugins
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -100,16 +111,6 @@ install(TARGETS
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
 )
-
-add_library(mujoco_cameras SHARED src/mujoco_cameras.cpp)
-ament_target_dependencies(mujoco_cameras ${THIS_PACKAGE_DEPENDS})
-target_link_libraries(mujoco_cameras ${MUJOCO_LIB} glfw)
-target_include_directories(mujoco_cameras
-  PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>
-    ${MUJOCO_INCLUDE_DIR}
-    ${EIGEN3_INCLUDE_DIR})
 
 install(TARGETS
   mujoco_rendering

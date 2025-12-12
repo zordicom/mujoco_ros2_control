@@ -22,6 +22,7 @@
 #define MUJOCO_ROS2_CONTROL__MUJOCO_SYSTEM_HPP_
 
 #include <Eigen/Dense>
+#include <atomic>
 #include <string>
 #include <vector>
 #include <thread>
@@ -42,6 +43,9 @@
 
 // Camera support
 #include "mujoco_ros2_control/mujoco_cameras.hpp"
+
+// GLFW for OpenGL context management
+#include <GLFW/glfw3.h>
 
 namespace mujoco_ros2_control
 {
@@ -205,6 +209,7 @@ private:
   mujoco_ros2_control::MujocoRendering* rendering_{nullptr};
   std::thread viewer_thread_;
   std::atomic<bool> stop_viewer_{false};
+  std::atomic<bool> camera_render_requested_{false};  // Signal viewer thread to render cameras
 
   // Clock publishing
   rclcpp::Publisher<rosgraph_msgs::msg::Clock>::SharedPtr clock_publisher_;
@@ -247,6 +252,8 @@ private:
   double camera_publish_rate_{6.0};
   int camera_counter_{0};
   int camera_interval_{10};
+  GLFWwindow* camera_gl_window_{nullptr};  // Offscreen OpenGL context for cameras
+  bool glfw_initialized_{false};  // Track if we initialized GLFW (for cleanup)
 
   // Shared simulation state (Singleton pattern)
   static std::mutex static_mutex_;

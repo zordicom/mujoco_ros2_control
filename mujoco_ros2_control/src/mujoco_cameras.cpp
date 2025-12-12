@@ -173,6 +173,17 @@ void MujocoCameras::register_cameras(const mjModel *mujoco_model)
 
     // Add to list of cameras
     cameras_.push_back(camera);
+
+    RCLCPP_INFO(
+      node_->get_logger(),
+      "Registered camera '%s': publishing to /%s/color (%dx%d)",
+      camera.name.c_str(), camera.name.c_str(), camera.width, camera.height);
+  }
+
+  if (cameras_.empty()) {
+    RCLCPP_WARN(node_->get_logger(), "No cameras found in MuJoCo model!");
+  } else {
+    RCLCPP_INFO(node_->get_logger(), "Registered %zu MuJoCo cameras", cameras_.size());
   }
 }
 
