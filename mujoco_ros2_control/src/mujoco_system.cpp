@@ -384,62 +384,13 @@ CallbackReturn MujocoSystem::on_deactivate(const rclcpp_lifecycle::State& /* pre
 }
 
 CallbackReturn MujocoSystem::on_cleanup(const rclcpp_lifecycle::State& /* prev */) {
-  RCLCPP_INFO(logger_, "Cleaning up MujocoSystem (%s)...", is_primary_ ? "PRIMARY" : "SECONDARY");
-
-  // Stop viewer thread if running (PRIMARY only owns the viewer)
-  if (is_primary_ && viewer_thread_.joinable()) {
-    stop_viewer_ = true;
-    viewer_thread_.join();
-    RCLCPP_DEBUG(logger_, "Viewer thread stopped");
-  }
-
-  // Clean up cameras
-  if (cameras_) {
-    cameras_->close();
-    cameras_.reset();
-  }
-
-  // Clean up camera OpenGL window
-  if (camera_gl_window_) {
-    glfwDestroyWindow(camera_gl_window_);
-    camera_gl_window_ = nullptr;
-  }
-
-  // Clean up EGL context
-  if (egl_display_ != EGL_NO_DISPLAY) {
-    eglMakeCurrent(egl_display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-    if (egl_surface_ != EGL_NO_SURFACE) eglDestroySurface(egl_display_, egl_surface_);
-    if (egl_context_ != EGL_NO_CONTEXT) eglDestroyContext(egl_display_, egl_context_);
-    eglTerminate(egl_display_);
-    egl_display_ = EGL_NO_DISPLAY;
-    egl_context_ = EGL_NO_CONTEXT;
-    egl_surface_ = EGL_NO_SURFACE;
-    RCLCPP_DEBUG(logger_, "EGL context destroyed");
-  }
-
-  // Terminate GLFW if we initialized it (after viewer and cameras are done)
-  if (glfw_initialized_) {
-    glfwTerminate();
-    glfw_initialized_ = false;
-    RCLCPP_DEBUG(logger_, "GLFW terminated");
-  }
-
-  // Stop executor thread (PRIMARY only owns the executor)
-  if (is_primary_) {
-    if (executor_) {
-      executor_->cancel();
-    }
-    if (executor_thread_.joinable()) {
-      executor_thread_.join();
-    }
-  }
-
-  // NOTE: Do NOT free or null mj_model_/mj_data_ here!
-  // These are shared resources managed by the singleton pattern.
-  // Keeping the pointers valid prevents controllers from losing their
-  // hardware interfaces during agent-initiated lifecycle cycling
-  // (deactivate→cleanup→configure→activate).
-
+  // Intentional no-op: GenesisCore's agent cycles hardware lifecycle
+  // (deactivate→cleanup→configure→activate) during init. Tearing down
+  // cameras, EGL, executor, or model pointers would break controllers
+  // and require respawning. Matching mock hardware behavior (GenericSystem)
+  // which also treats cleanup as a no-op.
+  // Real cleanup happens in the destructor when instance_count drops to 0.
+  RCLCPP_INFO(logger_, "MujocoSystem cleanup (no-op, preserving state for lifecycle cycling)");
   return CallbackReturn::SUCCESS;
 }
 
