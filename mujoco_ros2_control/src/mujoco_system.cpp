@@ -462,11 +462,10 @@ hardware_interface::return_type MujocoSystem::read(
       mj_forward(mj_model_, mj_data_);
     }
     else {
-      // Step simulation multiple times per control cycle to match real-time.
-      // controller_manager runs at update_rate Hz, MuJoCo at 1/timestep Hz.
-      // n_substeps = (1/update_rate) / timestep = 1/(100*0.001) = 10
-      int n_substeps = std::max(1, static_cast<int>(
-          std::round(1.0 / (100.0 * mj_model_->opt.timestep))));
+      // Step simulation multiple times per control cycle for faster-than-real-time.
+      // controller_manager at 100Hz, MuJoCo timestep 0.001s.
+      // n_substeps=10 → 1x real-time, n_substeps=100 → 10x real-time
+      int n_substeps = 100;
 
       for (int sub = 0; sub < n_substeps; ++sub) {
         mj_step1(mj_model_, mj_data_);
