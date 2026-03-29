@@ -379,13 +379,8 @@ CallbackReturn MujocoSystem::on_activate(const rclcpp_lifecycle::State& /* prev 
 }
 
 CallbackReturn MujocoSystem::on_deactivate(const rclcpp_lifecycle::State& /* prev */) {
-  // Return ERROR to prevent resource_manager from deactivating controllers
-  // (joint_state_broadcaster, gantry_controller). GenesisCore's agent cycles
-  // hardware lifecycle during init — if controllers are deactivated,
-  // joint_state_broadcaster stops publishing and the planner can never
-  // detect "reached destination".
-  RCLCPP_INFO(logger_, "MujocoSystem deactivate rejected (keeping controllers alive)");
-  return CallbackReturn::ERROR;
+  RCLCPP_INFO(logger_, "MujocoSystem deactivate (no-op, keeping state for lifecycle cycling)");
+  return CallbackReturn::SUCCESS;
 }
 
 CallbackReturn MujocoSystem::on_cleanup(const rclcpp_lifecycle::State& /* prev */) {
@@ -772,11 +767,12 @@ hardware_interface::return_type MujocoSystem::write(
 }
 
 hardware_interface::return_type MujocoSystem::prepare_command_mode_switch(
-  const std::vector<std::string> & /* start_interfaces */,
-  const std::vector<std::string> & /* stop_interfaces */)
+  const std::vector<std::string> &start_interfaces,
+  const std::vector<std::string> &stop_interfaces)
 {
-  // Validate that the requested interface combination is feasible
-  // In actuator-centric design, we accept any combination and handle it dynamically
+  // Log the switch for debugging
+  RCLCPP_INFO(logger_, "Command mode switch: started %zu interfaces, stopped %zu interfaces",
+              start_interfaces.size(), stop_interfaces.size());
   return hardware_interface::return_type::OK;
 }
 
