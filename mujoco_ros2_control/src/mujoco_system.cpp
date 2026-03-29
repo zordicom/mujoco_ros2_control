@@ -265,19 +265,6 @@ void MujocoSystem::create_services_and_publishers() {
 CallbackReturn MujocoSystem::on_configure(const rclcpp_lifecycle::State& /* prev */) {
   RCLCPP_INFO(logger_, "Configuring MujocoSystem (%s)...", is_primary_ ? "PRIMARY" : "SECONDARY");
 
-  // Re-acquire shared model/data pointers (nulled by on_cleanup)
-  if (!mj_model_ || !mj_data_) {
-    std::lock_guard<std::mutex> lock(static_mutex_);
-    mj_model_ = shared_model_;
-    mj_data_ = shared_data_;
-    node_ = shared_node_;
-    if (!mj_model_ || !mj_data_) {
-      RCLCPP_ERROR(logger_, "Cannot re-acquire shared MuJoCo model — was it destroyed?");
-      return CallbackReturn::ERROR;
-    }
-    RCLCPP_INFO(logger_, "Re-acquired shared MuJoCo model after cleanup");
-  }
-
   // Create services and publishers (primary only)
   create_services_and_publishers();
 
@@ -345,73 +332,11 @@ CallbackReturn MujocoSystem::on_configure(const rclcpp_lifecycle::State& /* prev
       RCLCPP_DEBUG(logger_, "Viewer thread stopped");
     });
   } else if (is_primary_ && enable_cameras_) {
-    // Headless camera mode: prefer EGL (no display needed), fallback to GLFW hidden window
-    bool gl_context_ready = false;
-
-    // Try EGL first (works on headless SSH, containers, etc.)
-    egl_display_ = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-    if (egl_display_ != EGL_NO_DISPLAY) {
-      EGLint major, minor;
-      if (eglInitialize(egl_display_, &major, &minor)) {
-        // Choose config with pbuffer support
-        EGLint config_attribs[] = {
-          EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
-          EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT,
-          EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8,
-          EGL_DEPTH_SIZE, 24,
-          EGL_NONE
-        };
-        EGLConfig egl_config;
-        EGLint num_configs;
-        if (eglChooseConfig(egl_display_, config_attribs, &egl_config, 1, &num_configs) && num_configs > 0) {
-          eglBindAPI(EGL_OPENGL_API);
-          egl_context_ = eglCreateContext(egl_display_, egl_config, EGL_NO_CONTEXT, nullptr);
-          if (egl_context_ != EGL_NO_CONTEXT) {
-            // Create 1x1 pbuffer surface
-            EGLint pbuffer_attribs[] = {EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE};
-            egl_surface_ = eglCreatePbufferSurface(egl_display_, egl_config, pbuffer_attribs);
-            eglMakeCurrent(egl_display_, egl_surface_, egl_surface_, egl_context_);
-            gl_context_ready = true;
-            RCLCPP_INFO(logger_, "EGL context created (headless, EGL %d.%d)", major, minor);
-          }
-        }
-        if (!gl_context_ready) {
-          eglTerminate(egl_display_);
-          egl_display_ = EGL_NO_DISPLAY;
-        }
-      }
-    }
-
-    // Fallback to GLFW hidden window (needs display server)
-    if (!gl_context_ready) {
-      RCLCPP_INFO(logger_, "EGL not available, trying GLFW hidden window...");
-      if (glfwInit()) {
-        glfw_initialized_ = true;
-        glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-        camera_gl_window_ = glfwCreateWindow(1, 1, "mujoco_camera_ctx", nullptr, nullptr);
-        if (camera_gl_window_) {
-          glfwMakeContextCurrent(camera_gl_window_);
-          gl_context_ready = true;
-          RCLCPP_INFO(logger_, "GLFW hidden window created for camera rendering");
-        } else {
-          glfwTerminate();
-          glfw_initialized_ = false;
-        }
-      }
-    }
-
-    if (gl_context_ready) {
-      cameras_ = std::make_unique<MujocoCameras>(node_);
-      cameras_->init(mj_model_);
-
-      double physics_rate = 1.0 / mj_model_->opt.timestep;
-      camera_interval_ = static_cast<int>(std::round(physics_rate / camera_publish_rate_));
-
-      RCLCPP_INFO(logger_, "Cameras initialized: %d steps between frames", camera_interval_);
-    } else {
-      RCLCPP_WARN(logger_, "No OpenGL context available (EGL and GLFW both failed) - cameras disabled");
-      enable_cameras_ = false;
-    }
+    // Headless camera mode: defer EGL/camera init to first read() call
+    // to avoid blocking on_configure (EGL init can take several seconds).
+    double physics_rate = 1.0 / mj_model_->opt.timestep;
+    camera_interval_ = static_cast<int>(std::round(physics_rate / camera_publish_rate_));
+    RCLCPP_INFO(logger_, "Cameras will be initialized on first render (deferred EGL init)");
   }
 
   RCLCPP_INFO(logger_, "MujocoSystem configured successfully");
@@ -509,12 +434,11 @@ CallbackReturn MujocoSystem::on_cleanup(const rclcpp_lifecycle::State& /* prev *
     }
   }
 
-  // NOTE: Do NOT free mj_model_/mj_data_ here!
+  // NOTE: Do NOT free or null mj_model_/mj_data_ here!
   // These are shared resources managed by the singleton pattern.
-  // They are freed in the destructor when instance_count_ drops to 0.
-  // Just clear the local pointers.
-  mj_data_ = nullptr;
-  mj_model_ = nullptr;
+  // Keeping the pointers valid prevents controllers from losing their
+  // hardware interfaces during agent-initiated lifecycle cycling
+  // (deactivate→cleanup→configure→activate).
 
   return CallbackReturn::SUCCESS;
 }
@@ -632,14 +556,54 @@ hardware_interface::return_type MujocoSystem::read(
     qfrc_bias_publisher_->publish(qfrc_msg);
 
     // Update cameras at specified interval
-    if (cameras_ && ++camera_counter_ >= camera_interval_) {
+    if (enable_cameras_ && ++camera_counter_ >= camera_interval_) {
       camera_counter_ = 0;
-      if (mujoco_viewer_) {
-        // Viewer mode: signal viewer thread to render cameras (same GL context)
-        camera_render_requested_.store(true);
-      } else {
-        // Headless mode: render directly on main thread
-        cameras_->update(mj_model_, mj_data_);
+
+      // Lazy init: create EGL context and cameras on first render
+      if (!cameras_) {
+        egl_display_ = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+        if (egl_display_ != EGL_NO_DISPLAY) {
+          EGLint major, minor;
+          if (eglInitialize(egl_display_, &major, &minor)) {
+            EGLint config_attribs[] = {
+              EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
+              EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT,
+              EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8,
+              EGL_DEPTH_SIZE, 24,
+              EGL_NONE
+            };
+            EGLConfig egl_config;
+            EGLint num_configs;
+            if (eglChooseConfig(egl_display_, config_attribs, &egl_config, 1, &num_configs) && num_configs > 0) {
+              eglBindAPI(EGL_OPENGL_API);
+              egl_context_ = eglCreateContext(egl_display_, egl_config, EGL_NO_CONTEXT, nullptr);
+              if (egl_context_ != EGL_NO_CONTEXT) {
+                EGLint pbuffer_attribs[] = {EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE};
+                egl_surface_ = eglCreatePbufferSurface(egl_display_, egl_config, pbuffer_attribs);
+                eglMakeCurrent(egl_display_, egl_surface_, egl_surface_, egl_context_);
+                cameras_ = std::make_unique<MujocoCameras>(node_);
+                cameras_->init(mj_model_);
+                RCLCPP_INFO(logger_, "EGL context + cameras initialized (headless, EGL %d.%d)", major, minor);
+              }
+            }
+            if (!cameras_) {
+              eglTerminate(egl_display_);
+              egl_display_ = EGL_NO_DISPLAY;
+            }
+          }
+        }
+        if (!cameras_) {
+          RCLCPP_WARN(logger_, "Failed to create EGL context - cameras disabled");
+          enable_cameras_ = false;
+        }
+      }
+
+      if (cameras_) {
+        if (mujoco_viewer_) {
+          camera_render_requested_.store(true);
+        } else {
+          cameras_->update(mj_model_, mj_data_);
+        }
       }
     }
   } // End if (is_primary_)
