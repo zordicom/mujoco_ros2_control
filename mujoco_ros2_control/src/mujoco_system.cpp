@@ -265,6 +265,19 @@ void MujocoSystem::create_services_and_publishers() {
 CallbackReturn MujocoSystem::on_configure(const rclcpp_lifecycle::State& /* prev */) {
   RCLCPP_INFO(logger_, "Configuring MujocoSystem (%s)...", is_primary_ ? "PRIMARY" : "SECONDARY");
 
+  // Re-acquire shared model/data pointers (nulled by on_cleanup)
+  if (!mj_model_ || !mj_data_) {
+    std::lock_guard<std::mutex> lock(static_mutex_);
+    mj_model_ = shared_model_;
+    mj_data_ = shared_data_;
+    node_ = shared_node_;
+    if (!mj_model_ || !mj_data_) {
+      RCLCPP_ERROR(logger_, "Cannot re-acquire shared MuJoCo model — was it destroyed?");
+      return CallbackReturn::ERROR;
+    }
+    RCLCPP_INFO(logger_, "Re-acquired shared MuJoCo model after cleanup");
+  }
+
   // Create services and publishers (primary only)
   create_services_and_publishers();
 
@@ -380,14 +393,21 @@ CallbackReturn MujocoSystem::on_activate(const rclcpp_lifecycle::State& /* prev 
     }
   }
 
-  // Start in PAUSED state (user must unpause via service)
+  // Only pause on first activation — re-activations (from agent hardware cycling)
+  // should preserve the current simulation state
   {
     std::lock_guard<std::mutex> lock(sim_state_mutex_);
-    sim_state_ = SimulationState::PAUSED;
+    if (!has_been_activated_) {
+      sim_state_ = SimulationState::PAUSED;
+      has_been_activated_ = true;
+      RCLCPP_INFO(logger_, "MujocoSystem active with %zu joints", joint_states_.size());
+      RCLCPP_INFO(logger_, "Simulation is PAUSED - use ~/simulation_control service to unpause");
+    } else {
+      RCLCPP_INFO(logger_, "MujocoSystem re-activated with %zu joints (sim state preserved: %s)",
+                  joint_states_.size(),
+                  sim_state_ == SimulationState::RUNNING ? "RUNNING" : "PAUSED");
+    }
   }
-
-  RCLCPP_INFO(logger_, "MujocoSystem active with %zu joints", joint_states_.size());
-  RCLCPP_INFO(logger_, "Simulation is PAUSED - use ~/simulation_control service to unpause");
   return CallbackReturn::SUCCESS;
 }
 

@@ -264,6 +264,7 @@ private:
   static std::string shared_model_path_;
 
   bool is_primary_{false};  // True if this instance is responsible for stepping simulation
+  bool has_been_activated_{false};  // Track first vs re-activation for pause behavior
 };
 }  // namespace mujoco_ros2_control
 
