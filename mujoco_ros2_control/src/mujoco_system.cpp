@@ -462,32 +462,38 @@ hardware_interface::return_type MujocoSystem::read(
       mj_forward(mj_model_, mj_data_);
     }
     else {
-      // Step simulation
-      mj_step1(mj_model_, mj_data_);
+      // Step simulation multiple times per control cycle to match real-time.
+      // controller_manager runs at update_rate Hz, MuJoCo at 1/timestep Hz.
+      // n_substeps = (1/update_rate) / timestep = 1/(100*0.001) = 10
+      int n_substeps = std::max(1, static_cast<int>(
+          std::round(1.0 / (100.0 * mj_model_->opt.timestep))));
 
-      // Apply external wrench if active
-      {
-        std::lock_guard<std::mutex> lock(wrench_mutex_);
-        if (active_wrench_.active && active_wrench_.body_id >= 0) {
-          mjtNum* xfrc = &mj_data_->xfrc_applied[6 * active_wrench_.body_id];
-          double now = mj_data_->time;
+      for (int sub = 0; sub < n_substeps; ++sub) {
+        mj_step1(mj_model_, mj_data_);
 
-          if (now <= active_wrench_.end_time) {
-            xfrc[0] = active_wrench_.fx;
-            xfrc[1] = active_wrench_.fy;
-            xfrc[2] = active_wrench_.fz;
-            xfrc[3] = active_wrench_.tx;
-            xfrc[4] = active_wrench_.ty;
-            xfrc[5] = active_wrench_.tz;
-          } else {
-            // Expired, clear
-            for (int i = 0; i < 6; i++) xfrc[i] = 0.0;
-            active_wrench_.active = false;
+        // Apply external wrench if active
+        {
+          std::lock_guard<std::mutex> lock(wrench_mutex_);
+          if (active_wrench_.active && active_wrench_.body_id >= 0) {
+            mjtNum* xfrc = &mj_data_->xfrc_applied[6 * active_wrench_.body_id];
+            double now = mj_data_->time;
+
+            if (now <= active_wrench_.end_time) {
+              xfrc[0] = active_wrench_.fx;
+              xfrc[1] = active_wrench_.fy;
+              xfrc[2] = active_wrench_.fz;
+              xfrc[3] = active_wrench_.tx;
+              xfrc[4] = active_wrench_.ty;
+              xfrc[5] = active_wrench_.tz;
+            } else {
+              for (int i = 0; i < 6; i++) xfrc[i] = 0.0;
+              active_wrench_.active = false;
+            }
           }
         }
-      }
 
-      mj_step2(mj_model_, mj_data_);
+        mj_step2(mj_model_, mj_data_);
+      }
     }
 
     // Publish clock
