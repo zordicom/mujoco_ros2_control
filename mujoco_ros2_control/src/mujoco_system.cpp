@@ -379,8 +379,13 @@ CallbackReturn MujocoSystem::on_activate(const rclcpp_lifecycle::State& /* prev 
 }
 
 CallbackReturn MujocoSystem::on_deactivate(const rclcpp_lifecycle::State& /* prev */) {
-  RCLCPP_INFO(logger_, "Deactivating MujocoSystem...");
-  return CallbackReturn::SUCCESS;
+  // Return ERROR to prevent resource_manager from deactivating controllers
+  // (joint_state_broadcaster, gantry_controller). GenesisCore's agent cycles
+  // hardware lifecycle during init — if controllers are deactivated,
+  // joint_state_broadcaster stops publishing and the planner can never
+  // detect "reached destination".
+  RCLCPP_INFO(logger_, "MujocoSystem deactivate rejected (keeping controllers alive)");
+  return CallbackReturn::ERROR;
 }
 
 CallbackReturn MujocoSystem::on_cleanup(const rclcpp_lifecycle::State& /* prev */) {
