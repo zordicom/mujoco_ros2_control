@@ -44,8 +44,11 @@
 // Camera support
 #include "mujoco_ros2_control/mujoco_cameras.hpp"
 
-// GLFW for OpenGL context management
+// GLFW for OpenGL context management (viewer mode)
 #include <GLFW/glfw3.h>
+
+// EGL for headless OpenGL context (camera rendering without display)
+#include <EGL/egl.h>
 
 namespace mujoco_ros2_control
 {
@@ -252,8 +255,11 @@ private:
   double camera_publish_rate_{6.0};
   int camera_counter_{0};
   int camera_interval_{10};
-  GLFWwindow* camera_gl_window_{nullptr};  // Offscreen OpenGL context for cameras
+  GLFWwindow* camera_gl_window_{nullptr};  // Offscreen OpenGL context for cameras (GLFW fallback)
   bool glfw_initialized_{false};  // Track if we initialized GLFW (for cleanup)
+  EGLDisplay egl_display_{EGL_NO_DISPLAY};  // EGL headless context
+  EGLContext egl_context_{EGL_NO_CONTEXT};
+  EGLSurface egl_surface_{EGL_NO_SURFACE};
 
   // Shared simulation state (Singleton pattern)
   static std::mutex static_mutex_;

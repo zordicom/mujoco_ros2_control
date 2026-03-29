@@ -97,7 +97,7 @@ target_include_directories(mujoco_cameras
 # Build mujoco_system plugin (links with mujoco_rendering and mujoco_cameras)
 add_library(mujoco_system_plugins SHARED src/mujoco_system.cpp)
 ament_target_dependencies(mujoco_system_plugins ${THIS_PACKAGE_DEPENDS})
-target_link_libraries(mujoco_system_plugins ${MUJOCO_LIB} mujoco_rendering mujoco_cameras glfw)
+target_link_libraries(mujoco_system_plugins ${MUJOCO_LIB} mujoco_rendering mujoco_cameras glfw EGL)
 target_include_directories(mujoco_system_plugins
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
