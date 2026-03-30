@@ -271,7 +271,7 @@ private:
 
   bool is_primary_{false};  // True if this instance is responsible for stepping simulation
   bool has_been_activated_{false};  // Track first vs re-activation for pause behavior
-  int sim_speed_{100};  // Physics substeps per control cycle (10=1x, 100=10x real-time)
+  int sim_speed_{10};  // Speed multiplier (1=1x, 10=10x real-time)
 };
 }  // namespace mujoco_ros2_control
 

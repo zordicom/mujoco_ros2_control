@@ -147,15 +147,15 @@ CallbackReturn MujocoSystem::on_init(const hardware_interface::HardwareInfo& inf
     }
   }
 
-  // Simulation speed multiplier (n_substeps per control cycle)
-  // 1 = 0.1x real-time, 10 = 1x real-time, 100 = 10x real-time
+  // Simulation speed multiplier: 1 = 1x real-time, 10 = 10x real-time
+  // Internally: n_substeps = sim_speed * (1 / (update_rate * timestep))
+  //           = sim_speed * (1 / (100 * 0.001)) = sim_speed * 10
   auto speed_it = info_.hardware_parameters.find("sim_speed");
   if (speed_it != info_.hardware_parameters.end()) {
     sim_speed_ = std::max(1, std::stoi(speed_it->second));
   }
-  RCLCPP_INFO(logger_, "Sim speed: %dx substeps (%s real-time)",
-              sim_speed_, sim_speed_ == 10 ? "1x" :
-              (sim_speed_ < 10 ? "<1x" : (std::to_string(sim_speed_/10) + "x").c_str()));
+  RCLCPP_INFO(logger_, "Sim speed: %dx real-time (%d substeps/cycle)",
+              sim_speed_, sim_speed_ * 10);
 
   // ---------------------------------------------------------
   // Shared Model Logic (Singleton)
@@ -473,8 +473,8 @@ hardware_interface::return_type MujocoSystem::read(
     }
     else {
       // Step simulation multiple times per control cycle.
-      // Configured via URDF <param name="sim_speed"> (default 100 = 10x)
-      int n_substeps = sim_speed_;
+      // sim_speed_=1 → 10 substeps (1x), sim_speed_=10 → 100 substeps (10x)
+      int n_substeps = sim_speed_ * 10;
 
       for (int sub = 0; sub < n_substeps; ++sub) {
         mj_step1(mj_model_, mj_data_);
