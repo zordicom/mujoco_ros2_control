@@ -344,9 +344,12 @@ CallbackReturn MujocoSystem::on_configure(const rclcpp_lifecycle::State& /* prev
   } else if (is_primary_ && enable_cameras_) {
     // Headless camera mode: defer EGL/camera init to first read() call
     // to avoid blocking on_configure (EGL init can take several seconds).
-    double physics_rate = 1.0 / mj_model_->opt.timestep;
-    camera_interval_ = static_cast<int>(std::round(physics_rate / camera_publish_rate_));
-    RCLCPP_INFO(logger_, "Cameras will be initialized on first render (deferred EGL init)");
+    // camera_interval_ counts read() calls (at control_rate Hz), not physics steps.
+    // With sim_speed_ substeps per read(), control_rate = 100Hz regardless of sim_speed.
+    double control_rate = 100.0;  // controller_manager update_rate
+    camera_interval_ = std::max(1, static_cast<int>(std::round(control_rate / camera_publish_rate_)));
+    RCLCPP_INFO(logger_, "Cameras will be initialized on first render (interval=%d reads, ~%.0ffps)",
+                camera_interval_, control_rate / camera_interval_);
   }
 
   RCLCPP_INFO(logger_, "MujocoSystem configured successfully");
